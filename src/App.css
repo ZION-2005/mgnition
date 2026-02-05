@@ -1,0 +1,389 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --brand: #d71920;
+  --bg: #f6f7f9;
+  --text: #161616;
+  --muted: #626262;
+  --line: #e7e7e7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Poppins', sans-serif;
+  background: radial-gradient(circle at top right, #fff7f7 0%, #ffffff 30%, var(--bg) 100%);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+.app {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.topbar {
+  max-width: 1200px;
+  margin: 0 auto 16px;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  color: var(--brand);
+  letter-spacing: 0.06em;
+}
+
+.tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tab-btn {
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tab-btn.active {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: #fff2f3;
+}
+
+.main-card {
+  max-width: 1200px;
+  margin: 0 auto;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 24px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.05);
+}
+
+h2,
+h3,
+h4 {
+  margin-top: 0;
+}
+
+.step-meta {
+  color: var(--brand);
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.card-grid,
+.list-grid,
+.seat-grid,
+.compare-grid,
+.filter-grid,
+.details-grid,
+.chip-row,
+.badge-row,
+.label-row {
+  display: grid;
+  gap: 12px;
+}
+
+.card-grid,
+.compare-grid,
+.filter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.seat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.option-card,
+.list-option {
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: 0.2s ease;
+}
+
+.option-card:hover,
+.list-option:hover {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+}
+
+.option-card.selected,
+.list-option.selected {
+  border-color: var(--brand);
+  background: #fff2f3;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #c8c8c8;
+  border-radius: 6px;
+}
+
+.selected .checkbox {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.text-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 14px;
+  outline: none;
+}
+
+.text-input:focus {
+  border-color: var(--brand);
+}
+
+.action-row,
+.link-row {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.primary-btn,
+.ghost-btn,
+.dark-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-btn {
+  background: var(--brand);
+  color: white;
+}
+
+.ghost-btn {
+  background: #f2f2f2;
+  color: #333;
+}
+
+.dark-btn {
+  background: #111;
+  color: white;
+  width: 100%;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  background: #fff;
+}
+
+.panel.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bottom-nav {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.bottom-nav button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 7px;
+  font-size: 0.78rem;
+  color: #444;
+}
+
+.badge,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  width: fit-content;
+}
+
+.badge {
+  border: 1px solid var(--brand);
+  color: var(--brand);
+}
+
+.chip {
+  background: #f2f2f2;
+  color: #343434;
+}
+
+.price {
+  color: var(--brand);
+  font-weight: 700;
+  margin-bottom: 0;
+}
+
+.banner {
+  border-radius: 14px;
+  background: linear-gradient(130deg, #191919 0%, #303030 75%);
+  color: white;
+  padding: 15px;
+  margin-bottom: 10px;
+}
+
+.label-row {
+  grid-template-columns: 1fr;
+}
+
+.label-row span {
+  border-left: 4px solid var(--brand);
+  padding-left: 8px;
+  font-weight: 600;
+}
+
+.car-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: #fff;
+}
+
+.car-image,
+.spec-card {
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f3f3f3 0%, #e8ebf2 100%);
+  border: 1px dashed #c5c8cf;
+  color: #595959;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+}
+
+.hero {
+  text-align: center;
+  background: linear-gradient(145deg, #ffffff 0%, #f9efef 100%);
+}
+
+.hero h2 {
+  font-size: clamp(1.4rem, 4vw, 2.2rem);
+  letter-spacing: 0.03em;
+}
+
+.slider-wrap {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.splash-screen {
+  min-height: 310px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+
+.splash-screen h2 {
+  margin: 0;
+  color: var(--brand);
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: 0.08em;
+}
+
+.error-msg {
+  color: #b21d1d;
+  font-size: 0.92rem;
+}
+
+.map-box {
+  position: relative;
+  border-radius: 14px;
+  min-height: 220px;
+  background: linear-gradient(135deg, #d9e3ef, #f4f8ff);
+  border: 1px solid var(--line);
+}
+
+.pin {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 6px rgba(215, 25, 32, 0.22);
+}
+
+.nearest-card {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: white;
+}
+
+@media (max-width: 768px) {
+  .app {
+    padding: 12px;
+  }
+
+  .main-card {
+    padding: 16px;
+  }
+
+  .bottom-nav {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .panel.compact {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

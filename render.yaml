@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: mgnition-backend
+    env: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.10"
+      - key: MGNITION_DB_PATH
+        value: /var/data/mgnition.db
+      - key: ALLOWED_ORIGINS
+        value: https://mgnition-frontend.vercel.app
+      - key: FLASK_DEBUG
+        value: "0"
+    disk:
+      name: mgnition-data
+      mountPath: /var/data
+      sizeGB: 1
