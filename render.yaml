@@ -3,7 +3,7 @@ services:
     name: mgnition-backend
     env: python
     rootDir: backend
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
