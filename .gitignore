@@ -1,0 +1,18 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/.venv/
+
+# Node
+node_modules/
+
+# Local data
+backend/mgnition.db
+
+# Swap files
+*.swp
+*.swo
