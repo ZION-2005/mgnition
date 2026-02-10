@@ -1577,6 +1577,20 @@ def admin_users():
     return jsonify({"users": [dict(r) for r in rows]})
 
 
+@app.get("/admin/promotions")
+@admin_required
+def admin_promotions():
+    rows = get_db().execute(
+        """
+        SELECT id, title, description, price_text, badge_text, image_url, model_name, variant_name, variant_key,
+               start_date, end_date, active, created_by, created_at
+        FROM promotions
+        ORDER BY id DESC
+        """
+    ).fetchall()
+    return jsonify({"promotions": [dict(r) for r in rows]})
+
+
 @app.post("/admin/promotions")
 @admin_required
 def admin_add_promotion():
@@ -1623,6 +1637,28 @@ def admin_add_promotion():
     )
     db.commit()
     return jsonify({"message": "Promotion added."}), 201
+
+
+@app.delete("/admin/promotions/<int:promo_id>")
+@admin_required
+def admin_delete_promotion(promo_id):
+    db = get_db()
+    db.execute("UPDATE promotions SET active = 0 WHERE id = ?", (promo_id,))
+    db.commit()
+    return jsonify({"message": "Promotion deleted."})
+
+
+@app.patch("/admin/promotions/<int:promo_id>")
+@admin_required
+def admin_update_promotion(promo_id):
+    payload = request.get_json(silent=True) or {}
+    if "active" not in payload:
+        return jsonify({"error": "active is required."}), 400
+    active = 1 if bool(payload.get("active")) else 0
+    db = get_db()
+    db.execute("UPDATE promotions SET active = ? WHERE id = ?", (active, promo_id))
+    db.commit()
+    return jsonify({"message": "Promotion updated.", "active": active})
 
 
 @app.post("/admin/models")

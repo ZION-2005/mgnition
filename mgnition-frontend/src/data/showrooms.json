@@ -1,0 +1,170 @@
+[
+  {
+    "id": "BKK01",
+    "name": "MG Sukhumvit 62",
+    "address": "21 Sukhumvit 62, Phra Khanong Tai, Bangkok 10260",
+    "lat": 13.7201,
+    "lng": 100.5843,
+    "phone": "02-311-7900"
+  },
+  {
+    "id": "BKK02",
+    "name": "MG Best Bangna",
+    "address": "Bangna-Trat Rd, Bang Na, Bangkok 10260",
+    "lat": 13.6687,
+    "lng": 100.6446,
+    "phone": "-"
+  },
+  {
+    "id": "BKK03",
+    "name": "MG Rungcharoen Nawamin",
+    "address": "Nawamin Rd, Bueng Kum, Bangkok 10240",
+    "lat": 13.8035,
+    "lng": 100.639,
+    "phone": "02-944-4499"
+  },
+  {
+    "id": "BKK04",
+    "name": "MG Rungcharoen Ladkrabang",
+    "address": "Ladkrabang Rd, Lat Krabang, Bangkok 10520",
+    "lat": 13.7288,
+    "lng": 100.7372,
+    "phone": "02-034-5000"
+  },
+  {
+    "id": "BKK05",
+    "name": "MG Sirindhorn",
+    "address": "Sirindhorn Rd, Bang Phlat, Bangkok 10700",
+    "lat": 13.7956,
+    "lng": 100.5078,
+    "phone": "-"
+  },
+  {
+    "id": "BKK06",
+    "name": "MG Triple M Ratchada-Taksin",
+    "address": "Ratchadaphisek Rd, Thon Buri, Bangkok 10600",
+    "lat": 13.7089,
+    "lng": 100.4882,
+    "phone": "-"
+  },
+  {
+    "id": "BKK07",
+    "name": "MG Srinakarin",
+    "address": "Srinakarin Rd, Suan Luang, Bangkok 10250",
+    "lat": 13.7416,
+    "lng": 100.6462,
+    "phone": "-"
+  },
+  {
+    "id": "BKK08",
+    "name": "MG Supreme Onnut",
+    "address": "Onnut Rd, Suan Luang, Bangkok 10250",
+    "lat": 13.7059,
+    "lng": 100.6074,
+    "phone": "-"
+  },
+  {
+    "id": "SPK01",
+    "name": "MG Rungcharoen Thepharak",
+    "address": "Thepharak Rd, Mueang Samut Prakan, Samut Prakan 10270",
+    "lat": 13.6259,
+    "lng": 100.6042,
+    "phone": "02-755-7799"
+  },
+  {
+    "id": "SPK02",
+    "name": "MG Rungcharoen Suksawat",
+    "address": "Suksawat Rd, Phra Pradaeng, Samut Prakan 10130",
+    "lat": 13.6806,
+    "lng": 100.514,
+    "phone": "02-405-4949"
+  },
+  {
+    "id": "SPK03",
+    "name": "MG Able Samutprakan",
+    "address": "Srinagarindra Rd, Mueang Samut Prakan, Samut Prakan 10270",
+    "lat": 13.602,
+    "lng": 100.61,
+    "phone": "-"
+  },
+  {
+    "id": "SPK04",
+    "name": "MG Bangpu",
+    "address": "Bang Pu Industrial Estate, Samut Prakan 10280",
+    "lat": 13.5116,
+    "lng": 100.6871,
+    "phone": "-"
+  },
+  {
+    "id": "NON01",
+    "name": "MG Rattanathibet",
+    "address": "Rattanathibet Rd, Bang Kraso, Nonthaburi 11000",
+    "lat": 13.8885,
+    "lng": 100.4915,
+    "phone": "-"
+  },
+  {
+    "id": "NON02",
+    "name": "MG Pracharat 21",
+    "address": "Pracharat Rd 21, Mueang Nonthaburi, Nonthaburi 11000",
+    "lat": 13.8595,
+    "lng": 100.5151,
+    "phone": "-"
+  },
+  {
+    "id": "PT01",
+    "name": "MG Able Pathum Thani",
+    "address": "Mueang Pathum Thani, Pathum Thani 12000",
+    "lat": 14.02,
+    "lng": 100.55,
+    "phone": "-"
+  },
+  {
+    "id": "PT02",
+    "name": "MG Rangsit",
+    "address": "Rangsit-Nakhon Nayok Rd, Pathum Thani 12130",
+    "lat": 14.0107,
+    "lng": 100.6163,
+    "phone": "-"
+  },
+  {
+    "id": "AY01",
+    "name": "MG Ayutthaya",
+    "address": "Bang Pa-In, Phra Nakhon Si Ayutthaya 13160",
+    "lat": 14.279,
+    "lng": 100.574,
+    "phone": "-"
+  },
+  {
+    "id": "AY02",
+    "name": "MG Sena Ayutthaya",
+    "address": "Sena District, Ayutthaya 13110",
+    "lat": 14.3275,
+    "lng": 100.4042,
+    "phone": "-"
+  },
+  {
+    "id": "SSK01",
+    "name": "MG Mahachai",
+    "address": "Rama 2 Rd, Mueang Samut Sakhon, Samut Sakhon 74000",
+    "lat": 13.5352,
+    "lng": 100.2766,
+    "phone": "034-406-644"
+  },
+  {
+    "id": "NPT01",
+    "name": "MG Nakhon Pathom",
+    "address": "Mueang Nakhon Pathom, Nakhon Pathom 73000",
+    "lat": 13.822,
+    "lng": 100.044,
+    "phone": "-"
+  },
+  {
+    "id": "NPT02",
+    "name": "MG Kamphaeng Saen",
+    "address": "Kamphaeng Saen, Nakhon Pathom 73140",
+    "lat": 14.0064,
+    "lng": 99.9769,
+    "phone": "-"
+  }
+]

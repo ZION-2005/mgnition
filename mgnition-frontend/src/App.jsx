@@ -133,6 +133,11 @@ function looksLikeImageUrl(v = '') {
   return /^https?:\/\//i.test(String(v).trim());
 }
 
+function priceToNumber(value = '') {
+  const num = Number(String(value).replace(/[^\d]/g, ''));
+  return Number.isNaN(num) ? 0 : num;
+}
+
 function extractColorImageMap(row) {
   if (!row || typeof row !== 'object') return {};
   if (row.Color_Images && typeof row.Color_Images === 'object') return row.Color_Images;
@@ -268,7 +273,9 @@ const COLOR_HEX = {
   orange: '#d7772b',
   yellow: '#e9bc33',
   beige: '#c8b28c',
-  brown: '#7e573e'
+  brown: '#7e573e',
+  pink: '#f08ab5',
+  purple: '#8a5ad8'
 };
 
 const MODEL_COLOR_FALLBACKS = {
@@ -283,6 +290,44 @@ function colorHexFromName(name = '') {
   const lower = String(name).toLowerCase();
   const k = Object.keys(COLOR_HEX).find((x) => lower.includes(x));
   return k ? COLOR_HEX[k] : '#d9d9d9';
+}
+
+const SIMPLE_COLOR_RULES = [
+  { name: 'Black', test: /black|knight|midnight|carbon|graphite/ },
+  { name: 'White', test: /white|arctic|pearl|snow/ },
+  { name: 'Grey', test: /grey|gray|granite|ash|slate/ },
+  { name: 'Silver', test: /silver|metallic|titanium|chrome/ },
+  { name: 'Red', test: /red|scarlet|ruby|crimson/ },
+  { name: 'Blue', test: /blue|navy|azure|sky|cobalt/ },
+  { name: 'Green', test: /green|emerald|forest|olive/ },
+  { name: 'Yellow', test: /yellow|gold/ },
+  { name: 'Orange', test: /orange|bronze|copper/ },
+  { name: 'Brown', test: /brown|chocolate|coffee/ },
+  { name: 'Beige', test: /beige|champagne|sand|khaki/ },
+  { name: 'Pink', test: /pink/ },
+  { name: 'Purple', test: /purple|violet/ }
+];
+
+function simplifyColorName(raw = '') {
+  const cleaned = normalizeColorLabel(raw);
+  const lower = cleaned.toLowerCase();
+  const match = SIMPLE_COLOR_RULES.find((rule) => rule.test.test(lower));
+  return match ? match.name : '';
+}
+
+function collectModelColors(model, variantRows = []) {
+  const colors = new Set();
+  const map = model?.colorImages || model?.color_images || {};
+  let keys = Object.keys(map || {});
+  if (!keys.length && model?.model) {
+    const row = variantRows.find((r) => normModelName(r.Model) === normModelName(model.model));
+    if (row) keys = extractVariantColors(row);
+  }
+  keys.forEach((c) => {
+    const simplified = simplifyColorName(c);
+    if (simplified) colors.add(simplified);
+  });
+  return [...colors];
 }
 
 function extractVariantColors(row) {
@@ -420,6 +465,7 @@ export default function App() {
     fuel: 'All',
     seats: 'All',
     bodyType: 'All',
+    colors: [],
     maxPrice: ''
   });
 
@@ -427,6 +473,16 @@ export default function App() {
 
   const [token, setToken] = useState(localStorage.getItem('mgnition_token') || '');
   const [currentUser, setCurrentUser] = useState(null);
+  const isGuest = !token;
+  const visibleNavItems = isGuest
+    ? NAV_ITEMS.filter((item) => !['Recommended Cars', 'Compare', 'Saved Results'].includes(item))
+    : NAV_ITEMS;
+  const hasQuizAnswers = useMemo(() => {
+    return Object.values(answers || {}).some((v) => {
+      if (Array.isArray(v)) return v.length > 0;
+      return Boolean(String(v || '').trim());
+    });
+  }, [answers]);
   const [savedCars, setSavedCars] = useState([]);
   const [authMode, setAuthMode] = useState('login');
   const [authError, setAuthError] = useState('');
@@ -439,6 +495,7 @@ export default function App() {
   const [publicAdminModels, setPublicAdminModels] = useState([]);
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [adminBookings, setAdminBookings] = useState([]);
+  const [adminPromotions, setAdminPromotions] = useState([]);
   const [adminMessage, setAdminMessage] = useState('');
   const [adminSection, setAdminSection] = useState('overview');
   const [promoForm, setPromoForm] = useState({
@@ -783,27 +840,68 @@ export default function App() {
 
   const filteredModels = useMemo(() => {
     const search = modelFilters.search.trim().toLowerCase();
-    const maxPrice = Number(String(modelFilters.maxPrice || '').replace(/[^\d]/g, ''));
+    const maxPrice = priceToNumber(modelFilters.maxPrice || '');
     return models.filter((m) => {
       const modelName = String(m.model || '').toLowerCase();
       const variantName = String(m.variant || '').toLowerCase();
       const haystack = `${modelName} ${variantName}`.trim();
-      const priceNum = Number(String(m.price || '').replace(/[^\d]/g, ''));
+      const priceNum = priceToNumber(m.price || '');
+      const modelColors = collectModelColors(m, variantRows);
 
       if (search && !haystack.includes(search)) return false;
       if (modelFilters.fuel !== 'All' && m.fuel !== modelFilters.fuel) return false;
       if (modelFilters.seats !== 'All' && String(m.seats || '').replace('.0', '') !== modelFilters.seats) return false;
       if (modelFilters.bodyType !== 'All' && m.bodyType !== modelFilters.bodyType) return false;
       if (maxPrice && !Number.isNaN(priceNum) && priceNum > maxPrice) return false;
+      if (modelFilters.colors.length && !modelFilters.colors.some((c) => modelColors.includes(c))) return false;
       return true;
     });
   }, [models, modelFilters]);
 
-  useEffect(() => {
+  const modelPriceBounds = useMemo(() => {
+    const prices = models.map((m) => priceToNumber(m.price || '')).filter((n) => n > 0);
+    if (!prices.length) return { min: 0, max: 2000000 };
+    return { min: Math.min(...prices), max: Math.max(...prices) };
+  }, [models]);
+
+  const availableFilterColors = useMemo(() => {
+    const set = new Set();
+    models.forEach((m) => collectModelColors(m, variantRows).forEach((c) => set.add(c)));
+    const order = ['Black', 'White', 'Grey', 'Silver', 'Red', 'Blue', 'Green', 'Yellow', 'Orange', 'Brown', 'Beige', 'Pink', 'Purple'];
+    return order.filter((c) => set.has(c));
+  }, [models, variantRows]);
+
+  const refreshPublicPromotions = () => {
     fetch(`${API_BASE}/public/promotions`)
       .then((r) => r.json())
       .then((d) => setPublicPromotions(d.promotions || []))
       .catch(() => {});
+  };
+
+  const refreshAdminPromotions = () => {
+    if (!token) return;
+    fetch(`${API_BASE}/admin/promotions`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => r.json())
+      .then((d) => setAdminPromotions(d.promotions || []))
+      .catch(() => {});
+  };
+
+  const resetModelFilters = () => {
+    setModelFilters({
+      search: '',
+      fuel: 'All',
+      seats: 'All',
+      bodyType: 'All',
+      colors: [],
+      maxPrice: ''
+    });
+  };
+
+
+  useEffect(() => {
+    refreshPublicPromotions();
 
     fetch(`${API_BASE}/public/admin-models`)
       .then((r) => r.json())
@@ -848,11 +946,21 @@ export default function App() {
       .then((r) => r.json())
       .then((d) => setAdminBookings(d.bookings || []))
       .catch(() => {});
+
+    refreshAdminPromotions();
   }, [page, token, currentUser]);
 
   useEffect(() => {
     if (page === 'onboarding') setOnboardingStep(0);
   }, [page]);
+
+  useEffect(() => {
+    if (!isGuest) return;
+    if (page === 'results' || page === 'compare' || page === 'saved') {
+      setActiveNav('Home');
+      setPage('home');
+    }
+  }, [isGuest, page]);
 
   useEffect(() => {
     setPageHistory((prev) => {
@@ -1155,10 +1263,42 @@ export default function App() {
       start_date: '',
       end_date: ''
     });
-    fetch(`${API_BASE}/public/promotions`)
-      .then((r) => r.json())
-      .then((d) => setPublicPromotions(d.promotions || []))
-      .catch(() => {});
+    refreshPublicPromotions();
+    refreshAdminPromotions();
+  };
+
+  const handleDeletePromotion = async (promoId) => {
+    if (!token) return;
+    const res = await fetch(`${API_BASE}/admin/promotions/${promoId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      refreshPublicPromotions();
+      refreshAdminPromotions();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setAdminMessage(data.error || 'Failed to delete promotion.');
+    }
+  };
+
+  const handleSetPromotionStatus = async (promoId, isActive) => {
+    if (!token) return;
+    const res = await fetch(`${API_BASE}/admin/promotions/${promoId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ active: isActive })
+    });
+    if (res.ok) {
+      refreshPublicPromotions();
+      refreshAdminPromotions();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setAdminMessage(data.error || 'Failed to update promotion.');
+    }
   };
 
   const handleAddAdminModel = async (e) => {
@@ -1253,6 +1393,12 @@ export default function App() {
   };
 
   const handleAddToCompare = (car) => {
+    if (isGuest) {
+      setAuthMode('login');
+      setPage('auth');
+      setAuthError('Please sign in to compare cars.');
+      return;
+    }
     const item = buildComparisonItem(car);
     setCompareError('');
     setCompareCars((prev) => {
@@ -1353,20 +1499,13 @@ export default function App() {
       {page !== 'onboarding' && page !== 'admin' && (
         <TopBar
           active={activeNav}
+          navItems={visibleNavItems}
           onNav={onNav}
           onAuth={() => setPage('auth')}
           currentUser={currentUser}
           onLogout={handleLogout}
         />
       )}
-      {page !== 'landing' && page !== 'onboarding' && page !== 'admin' && (
-        <div className="global-back-wrap">
-          <button className="global-back" onClick={handleBack} type="button">
-            ← Back
-          </button>
-        </div>
-      )}
-
       {page === 'landing' && (
         <>
           <section className="hero" style={{ backgroundImage: `url(${HERO_IMG})` }}>
@@ -1416,25 +1555,45 @@ export default function App() {
       {page === 'home' && (
         <>
           <section className="page-section" id="home-content">
-            <div className="home-section-head">
-              <h1>Recommended Cars</h1>
-              <h2>Best Matches Based On Your Preferences</h2>
-              {token && (
+            {!isGuest && hasQuizAnswers && (
+              <>
+                <div className="home-section-head">
+                  <h1>Recommended Cars</h1>
+                  <h2>Best Matches Based On Your Preferences</h2>
+                  {token && hasQuizAnswers && (
+                    <button className="btn light" type="button" onClick={() => setPage('onboarding')}>
+                      Update Preferences
+                    </button>
+                  )}
+                  {!token && (
+                    <button className="btn light" type="button" onClick={() => { setAuthMode('signup'); setPage('auth'); }}>
+                      Sign up to personalize recommendations
+                    </button>
+                  )}
+                </div>
+                <div className="cards three">
+                  {(homeRecommendations.length ? homeRecommendations : bestSellerCars).map((car) => (
+                    <CarCard
+                      key={savedCarKey(car)}
+                      car={car}
+                      onView={handleViewDetails}
+                      onCompare={isGuest ? null : handleAddToCompare}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+            {!isGuest && !hasQuizAnswers && (
+              <div className="quiz-banner">
+                <div>
+                  <h3>Personalized Recommendations</h3>
+                  <p>Take the quiz to unlock your best matches.</p>
+                </div>
                 <button className="btn light" type="button" onClick={() => setPage('onboarding')}>
-                  Retake Quiz
+                  Start Quiz
                 </button>
-              )}
-              {!token && (
-                <button className="btn light" type="button" onClick={() => { setAuthMode('signup'); setPage('auth'); }}>
-                  Sign up to personalize recommendations
-                </button>
-              )}
-            </div>
-            <div className="cards three">
-              {(homeRecommendations.length ? homeRecommendations : bestSellerCars).map((car) => (
-                <CarCard key={savedCarKey(car)} car={car} onView={handleViewDetails} onCompare={handleAddToCompare} />
-              ))}
-            </div>
+              </div>
+            )}
 
             <div className="right-content">
               <h2>
@@ -1442,7 +1601,12 @@ export default function App() {
               </h2>
               <div className="cards two">
                 {bestSellerCars.map((car) => (
-                  <CarCard key={savedCarKey(car)} car={car} onView={handleViewDetails} onCompare={handleAddToCompare} />
+                  <CarCard
+                    key={savedCarKey(car)}
+                    car={car}
+                    onView={handleViewDetails}
+                    onCompare={isGuest ? null : handleAddToCompare}
+                  />
                 ))}
               </div>
             </div>
@@ -1468,18 +1632,7 @@ export default function App() {
                   </div>
                 ))
               ) : (
-                promoCars.map((car) => (
-                  <div key={savedCarKey(car)} className="promo-card">
-                    <img src={modelImage(car)} alt={car.model} />
-                    <div>
-                      <h3>Special starting price: {car.price}</h3>
-                      <p>FREE MG Home Charger</p>
-                      <p>FREE installation</p>
-                      <p>Lifetime Warranty</p>
-                      <p>Suitable for city driving and family use</p>
-                    </div>
-                  </div>
-                ))
+                <p className="muted-text">No active promotions right now.</p>
               )}
             </div>
           </section>
@@ -1570,14 +1723,30 @@ export default function App() {
         <section className="page-section">
           <h1>Recommended Cars</h1>
           <h2>Best Matches Based On Your Preferences</h2>
-          <button className="btn light" type="button" onClick={() => { setActiveNav('Our Models'); setPage('models'); }}>
-            Back to Our Models
-          </button>
-          <div className="cards three">
-            {(results.length ? results : bestSellerCars).slice(0, 3).map((car) => (
-              <CarCard key={savedCarKey(car)} car={car} onView={handleViewDetails} onCompare={handleAddToCompare} />
-            ))}
-          </div>
+          {hasQuizAnswers ? (
+            <>
+              <button className="btn light" type="button" onClick={() => { setActiveNav('Our Models'); setPage('models'); }}>
+                Back to Our Models
+              </button>
+              <div className="cards three">
+                {(results.length ? results : bestSellerCars).slice(0, 3).map((car) => (
+                  <CarCard
+                    key={savedCarKey(car)}
+                    car={car}
+                    onView={handleViewDetails}
+                    onCompare={isGuest ? null : handleAddToCompare}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="auth-box" style={{ maxWidth: 520 }}>
+              <p className="auth-error">Complete the quiz to see your recommended cars.</p>
+              <button className="btn black" type="button" onClick={() => setPage('onboarding')}>
+                Start Quiz
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1648,34 +1817,124 @@ export default function App() {
 
       {page === 'models' && (
         <section className="page-section">
-          <h1>Our Models</h1>
-          <h2>All Cars In Our Database</h2>
-          <div className="model-filters">
-            <input
-              placeholder="Search model or variant"
-              value={modelFilters.search}
-              onChange={(e) => setModelFilters((p) => ({ ...p, search: e.target.value }))}
-            />
-            <select value={modelFilters.fuel} onChange={(e) => setModelFilters((p) => ({ ...p, fuel: e.target.value }))}>
-              {modelFilterChoices.fuels.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-            <select value={modelFilters.seats} onChange={(e) => setModelFilters((p) => ({ ...p, seats: e.target.value }))}>
-              {modelFilterChoices.seats.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-            <select value={modelFilters.bodyType} onChange={(e) => setModelFilters((p) => ({ ...p, bodyType: e.target.value }))}>
-              {modelFilterChoices.bodyTypes.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-            <input
-              placeholder="Max Price (THB)"
-              value={modelFilters.maxPrice}
-              onChange={(e) => setModelFilters((p) => ({ ...p, maxPrice: e.target.value }))}
-            />
+          <h1>MG Models</h1>
+          <div className="filters-panel">
+            <div className="filters-panel-head">
+              <div>
+                <h3>Filters</h3>
+              </div>
+              <button className="filter-reset" type="button" onClick={resetModelFilters}>
+                Reset
+              </button>
+            </div>
+            <div className="model-filters">
+              <label className="filter-field">
+                <span>Search</span>
+                <input
+                  placeholder="Search model or variant"
+                  value={modelFilters.search}
+                  onChange={(e) => setModelFilters((p) => ({ ...p, search: e.target.value }))}
+                />
+              </label>
+              <div className="filter-field chip-field">
+                <span>Fuel Type</span>
+                <div className="chip-row">
+                  {modelFilterChoices.fuels.map((x) => (
+                    <button
+                      key={x}
+                      type="button"
+                      className={modelFilters.fuel === x ? 'filter-chip active' : 'filter-chip'}
+                      onClick={() => setModelFilters((p) => ({ ...p, fuel: x }))}
+                    >
+                      {x}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="filter-field chip-field">
+                <span>Seats</span>
+                <div className="chip-row">
+                  {modelFilterChoices.seats.map((x) => (
+                    <button
+                      key={x}
+                      type="button"
+                      className={modelFilters.seats === x ? 'filter-chip active' : 'filter-chip'}
+                      onClick={() => setModelFilters((p) => ({ ...p, seats: x }))}
+                    >
+                      {x}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="filter-field chip-field">
+                <span>Body Type</span>
+                <div className="chip-row">
+                  {modelFilterChoices.bodyTypes.map((x) => (
+                    <button
+                      key={x}
+                      type="button"
+                      className={modelFilters.bodyType === x ? 'filter-chip active' : 'filter-chip'}
+                      onClick={() => setModelFilters((p) => ({ ...p, bodyType: x }))}
+                    >
+                      {x}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="filter-field price-filter">
+                <span>Price Range (THB)</span>
+                <div className="price-range-meta">
+                  <span>฿{fmtNumber(modelPriceBounds.min)}</span>
+                  <span>฿{fmtNumber(modelFilters.maxPrice ? Number(modelFilters.maxPrice) : modelPriceBounds.max)}</span>
+                </div>
+                <input
+                  className="price-range"
+                  type="range"
+                  min={modelPriceBounds.min}
+                  max={modelPriceBounds.max}
+                  step={10000}
+                  value={modelFilters.maxPrice ? Number(modelFilters.maxPrice) : modelPriceBounds.max}
+                  onChange={(e) => setModelFilters((p) => ({ ...p, maxPrice: e.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="color-filter">
+              <div className="color-filter-head">
+                <span>Color</span>
+                {modelFilters.colors.length > 0 && (
+                  <button
+                    type="button"
+                    className="color-clear"
+                    onClick={() => setModelFilters((p) => ({ ...p, colors: [] }))}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="color-grid">
+                {availableFilterColors.map((color) => {
+                  const selected = modelFilters.colors.includes(color);
+                  return (
+                    <button
+                      key={color}
+                      type="button"
+                      className={selected ? 'color-chip selected' : 'color-chip'}
+                      onClick={() =>
+                        setModelFilters((p) => {
+                          const current = p.colors || [];
+                          return current.includes(color)
+                            ? { ...p, colors: current.filter((c) => c !== color) }
+                            : { ...p, colors: [...current, color] };
+                        })
+                      }
+                    >
+                      <span className="color-dot" style={{ background: colorHexFromName(color) }} />
+                      <span className="color-label">{color}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <div className="model-list-grid">
             {filteredModels.map((car) => (
@@ -1851,19 +2110,23 @@ export default function App() {
             <button className="btn black" onClick={() => handleSaveModel(selectedCar)} type="button">
               Save to My Account
             </button>
-            <button className="btn light" onClick={() => handleAddToCompare(selectedDetailVariantForCompare || selectedCar)} type="button">
-              Add Selected Variant to Compare
-            </button>
-            <button
-              className="btn light"
-              onClick={() => {
-                setActiveNav('Compare');
-                setPage('compare');
-              }}
-              type="button"
-            >
-              Go to Compare
-            </button>
+            {!isGuest && (
+              <>
+                <button className="btn light" onClick={() => handleAddToCompare(selectedDetailVariantForCompare || selectedCar)} type="button">
+                  Add Selected Variant to Compare
+                </button>
+                <button
+                  className="btn light"
+                  onClick={() => {
+                    setActiveNav('Compare');
+                    setPage('compare');
+                  }}
+                  type="button"
+                >
+                  Go to Compare
+                </button>
+              </>
+            )}
           </div>
         </section>
       )}
@@ -2157,9 +2420,11 @@ export default function App() {
                   <button className="btn black" onClick={() => handleViewDetails(car)} type="button">
                     View Details
                   </button>
-                  <button className="btn light" onClick={() => handleAddToCompare(car)} type="button">
-                    Add to Compare
-                  </button>
+                  {!isGuest && (
+                    <button className="btn light" onClick={() => handleAddToCompare(car)} type="button">
+                      Add to Compare
+                    </button>
+                  )}
                   <button
                     className="btn light"
                     onClick={() => handleRemoveSaved(car.variant_key || `${car.model}|${car.variant || ''}|${car.year || ''}`)}
@@ -2446,37 +2711,85 @@ export default function App() {
             )}
 
             {adminSection === 'promotions' && (
-              <article className="admin-card">
-                <div className="admin-card-head">
-                  <h3>Publish Promotion</h3>
-                </div>
-                <form className="auth-form" onSubmit={handleAddPromotion}>
-                  <input placeholder="Title *" value={promoForm.title} onChange={(e) => setPromoForm((p) => ({ ...p, title: e.target.value }))} />
-                  <select value={promoForm.model_name} onChange={(e) => setPromoForm((p) => ({ ...p, model_name: e.target.value, variant_key: '', variant_name: '' }))}>
-                    <option value="">Apply to All Models (General Promotion)</option>
-                    {promoModelOptions.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={promoForm.variant_key}
-                    onChange={(e) => setPromoForm((p) => ({ ...p, variant_key: e.target.value }))}
-                    disabled={!promoForm.model_name}
-                  >
-                    <option value="">All variants of selected model</option>
-                    {promoVariantOptions.map((v) => (
-                      <option key={v.key} value={v.key}>{v.label}</option>
-                    ))}
-                  </select>
-                  <input placeholder="Price Text" value={promoForm.price_text} onChange={(e) => setPromoForm((p) => ({ ...p, price_text: e.target.value }))} />
-                  <input placeholder="Badge Text" value={promoForm.badge_text} onChange={(e) => setPromoForm((p) => ({ ...p, badge_text: e.target.value }))} />
-                  <input placeholder="Image URL" value={promoForm.image_url} onChange={(e) => setPromoForm((p) => ({ ...p, image_url: e.target.value }))} />
-                  <input placeholder="Start Date (YYYY-MM-DD)" value={promoForm.start_date} onChange={(e) => setPromoForm((p) => ({ ...p, start_date: e.target.value }))} />
-                  <input placeholder="End Date (YYYY-MM-DD)" value={promoForm.end_date} onChange={(e) => setPromoForm((p) => ({ ...p, end_date: e.target.value }))} />
-                  <input placeholder="Description" value={promoForm.description} onChange={(e) => setPromoForm((p) => ({ ...p, description: e.target.value }))} />
-                  <button className="btn black full" type="submit">Publish Promotion</button>
-                </form>
-              </article>
+              <>
+                <article className="admin-card">
+                  <div className="admin-card-head">
+                    <h3>Publish Promotion</h3>
+                  </div>
+                  <form className="auth-form" onSubmit={handleAddPromotion}>
+                    <input placeholder="Title *" value={promoForm.title} onChange={(e) => setPromoForm((p) => ({ ...p, title: e.target.value }))} />
+                    <select value={promoForm.model_name} onChange={(e) => setPromoForm((p) => ({ ...p, model_name: e.target.value, variant_key: '', variant_name: '' }))}>
+                      <option value="">Apply to All Models (General Promotion)</option>
+                      {promoModelOptions.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={promoForm.variant_key}
+                      onChange={(e) => setPromoForm((p) => ({ ...p, variant_key: e.target.value }))}
+                      disabled={!promoForm.model_name}
+                    >
+                      <option value="">All variants of selected model</option>
+                      {promoVariantOptions.map((v) => (
+                        <option key={v.key} value={v.key}>{v.label}</option>
+                      ))}
+                    </select>
+                    <input placeholder="Price Text" value={promoForm.price_text} onChange={(e) => setPromoForm((p) => ({ ...p, price_text: e.target.value }))} />
+                    <input placeholder="Badge Text" value={promoForm.badge_text} onChange={(e) => setPromoForm((p) => ({ ...p, badge_text: e.target.value }))} />
+                    <input placeholder="Image URL" value={promoForm.image_url} onChange={(e) => setPromoForm((p) => ({ ...p, image_url: e.target.value }))} />
+                    <input placeholder="Start Date (YYYY-MM-DD)" value={promoForm.start_date} onChange={(e) => setPromoForm((p) => ({ ...p, start_date: e.target.value }))} />
+                    <input placeholder="End Date (YYYY-MM-DD)" value={promoForm.end_date} onChange={(e) => setPromoForm((p) => ({ ...p, end_date: e.target.value }))} />
+                    <input placeholder="Description" value={promoForm.description} onChange={(e) => setPromoForm((p) => ({ ...p, description: e.target.value }))} />
+                    <button className="btn black full" type="submit">Publish Promotion</button>
+                  </form>
+                </article>
+
+                <article className="admin-card">
+                  <div className="admin-card-head">
+                    <h3>Promotion History</h3>
+                  </div>
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Title</th>
+                          <th>Model</th>
+                          <th>Variant</th>
+                          <th>Dates</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminPromotions.map((promo) => (
+                          <tr key={`promo-${promo.id}`}>
+                            <td>{promo.title || '-'}</td>
+                            <td>{promo.model_name || '-'}</td>
+                            <td>{promo.variant_name || (promo.variant_key ? variantLabelFromKey(promo.variant_key) : '-')}</td>
+                            <td>
+                              {promo.start_date || '-'} {promo.end_date ? `→ ${promo.end_date}` : ''}
+                            </td>
+                            <td>
+                              <select
+                                className="admin-status"
+                                value={promo.active ? 'active' : 'inactive'}
+                                onChange={(e) => handleSetPromotionStatus(promo.id, e.target.value === 'active')}
+                              >
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                        {!adminPromotions.length && (
+                          <tr>
+                            <td colSpan={5}>No promotions yet.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              </>
             )}
 
 
@@ -2511,12 +2824,13 @@ export default function App() {
   );
 }
 
-function TopBar({ active, onNav, onAuth, currentUser, onLogout }) {
+function TopBar({ active, navItems, onNav, onAuth, currentUser, onLogout }) {
+  const items = navItems || NAV_ITEMS;
   return (
     <header className="topbar">
       <img src="/mgnition-logo-nav.png" alt="MGNITION" />
       <nav>
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <button key={item} className={active === item ? 'nav active' : 'nav'} onClick={() => onNav(item)} type="button">
             {item}
           </button>

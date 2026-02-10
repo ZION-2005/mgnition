@@ -1,0 +1,238 @@
+[
+  {
+    "model": "MG 3 Hybrid+",
+    "price": "579,900 THB",
+    "fuel": "Hybrid",
+    "seats": 5.0,
+    "bodyType": "Hatchback",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/4d07f4aa334c77376d1360fcd519de1c.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/f2bd7d9fd0103467a77583d2fa768cc0.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/dbca44266374380541c639f350d5913a.png",
+      "Metal Ash Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/c62687ac57da10d8c7d6dce9b7eb3de1.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG Cyberster",
+    "price": "2,499,000 THB",
+    "fuel": "EV",
+    "seats": 2.0,
+    "bodyType": "Convertible",
+    "colorImages": {
+      "Flame": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/c0eee3203ce393ca1571c03080d3fe75.png",
+      "Bullet": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/2f831768f32a778b91be2b51e00b2865.png",
+      "Photon": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/4579d7fa671db1d83da99e7dfcb357e5.png",
+      "Modern Beige": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/5e660bb391cfbe96d61922b91877da8d.png"
+    },
+    "defaultColor": "Flame"
+  },
+  {
+    "model": "MG EP Plus",
+    "price": "771,000 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "Wagon",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/3773ed591d44792eb3bc67fe8249da5c.png",
+      "Pearl White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/18942a471d290877b0edb44867cfc7e3.png",
+      "Granite Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/a905c37cdfaeeb7f1bab990e66d9956f.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG ES",
+    "price": "959,000 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "Wagon",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/f1a09c8f79512e04c16ec849164b6f38.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/527c9aaf1993a73ad7a3aae7d17aefda.png",
+      "Andes Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/afacc93198591dbfdb2088c791032959.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/d00f885bef14a6ad2295210e0b61fa4b.png",
+      "Champagne Silver": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/d00f885bef14a6ad2295210e0b61fa4b.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG Extender DC",
+    "price": "769,000 THB",
+    "fuel": "Diesel",
+    "seats": 5.0,
+    "bodyType": "Pickup",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/c216e2b8989e0512abcb48b3c0b3ed77.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/39f345e75771b6cab6fcd39d814a58cf.png",
+      "Andes Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/6099cff62dbd347be90d164c6fbe8743.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/28825f1ef98b6f1105c446d4ce0dfac6.png",
+      "Silver Metallic": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/77aef1cc82b5d633eaf696a1e74d53bc.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG Extender GC",
+    "price": "589,000 THB",
+    "fuel": "Diesel",
+    "seats": 2.0,
+    "bodyType": "Pickup",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/801214314b812db1cc1a5a2ea437fd4a.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/10093fd4ba4810d484d0a92c6b53ad50.png",
+      "Andes Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/e0232094fdd759dc6e2f4935c81dca91.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/f8d0e28e5a5f1945d998991d1a22e278.png",
+      "Silver Metallic": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/bf3a57a8f59084555f55ed2c1c4d4674.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG HS",
+    "price": "939,000 THB",
+    "fuel": "Petrol",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/0030ce1882f85adb8f8859f5e5b5b0b8.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/1fd60869c42da9869fbbc63407f4b55c.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/1da3078ba0e72f94b29336402e9ee530.png",
+      "Metal Ash Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/224eeeadeeab9e348ea427df45b1c75f.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG HS PHEV",
+    "price": "1,299,000 THB",
+    "fuel": "Plug-in Hybrid",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/e31ce264db287f10a80aa4b8311cf04c.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/4388e6b0f7ded0cc72be9f1c61949127.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/cdbed8c47bbcf2ea7ba6b369a412de33.png",
+      "Metal Ash Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/f2923db1907b664f84f939a9961f056a.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG IM6 ",
+    "price": "1,399,900 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Nevis Blue": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/9303d7bc507e4fb6dbdfde2a5a276cbb.png",
+      "Raphael Beige": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/ee357fb954c8b81af683ceb3a7edde44.png",
+      "Ferdinand Pink": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/8cca3f58608b92da9c53192e15dfe224.png",
+      "Rembrandt Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/287b0f851fdf120fb8e358e7a95f2c3c.png",
+      "Ares Black": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/2628f6fd3affa2c046e4c1824c9ec115.png"
+    },
+    "defaultColor": "Nevis Blue"
+  },
+  {
+    "model": "MG MAXUS 7",
+    "price": "1,769,000 THB",
+    "fuel": "EV",
+    "seats": 7.0,
+    "bodyType": "MPV",
+    "colorImages": {
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/2abb4a2252b70f593ad05a1ae7cc18be.png",
+      "Pearl White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/263df9ab1c83c3566847d20541c50df9.png",
+      "Emerald Green": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/d58546f1d061c7438fe418627e8c7068.png",
+      "Granite Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/ae0d1902337de3b7082f5e40c74e3937.png"
+    },
+    "defaultColor": "Black Knight"
+  },
+  {
+    "model": "MG MAXUS 9",
+    "price": "2,499,000 THB",
+    "fuel": "EV",
+    "seats": 7.0,
+    "bodyType": "MPV",
+    "colorImages": {
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/1942852ae2499f6f9ac377afef175710.png",
+      "Pearl White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/28be014ed4169065ca05f97a283d8bd7.png"
+    },
+    "defaultColor": "Black Knight"
+  },
+  {
+    "model": "MG VS HEV",
+    "price": "699,000 THB",
+    "fuel": "Hybrid",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/5e9223f25c0c21e86846c478698aefbd.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/a90b9800fb7044d7d9fc9926e7d09e9b.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/19074d8fc14547a8b4cb150d3fa4e292.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG ZS",
+    "price": "599,000 THB",
+    "fuel": "Petrol",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/152d70cffe3b1910ee87f755a12077cb.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/e2effebb3420131b2d206ea2143a0f0f.png",
+      "Scarlet Red": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/3404e50f87714f6f03814b96979556c0.png",
+      "Silver Metallic": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/aa04d723f65cf347b6b3309b5a438edf.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG ZS EV",
+    "price": "829,900 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/7e5c70caa296a24693b9d113b2bf0252.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/bd24ceda33d2d7fd54ac601b673c667f.png",
+      "Granite Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/07ecc5b671bae5bb2b18c2e74882bd8a.png",
+      "Cosmic Silver": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/2067a4016b87eafcef1a32657f657491.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG4 Electric",
+    "price": "709,900 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "Hatchback",
+    "colorImages": {
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/5a48809718c128e51efb7b4174cbdeb9.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/d7fbcaad2c37e93f922d9d64298bf017.png",
+      "Andes Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/6a08c3f6bfe4bfc32af674fc59361ff1.png",
+      "Frizzy Orange": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/87cc26b09f4e55542dca94927fd6cc3a.png",
+      "Sol Blue": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/e358a0c2a90fb51f4b02e813d747dbed.png"
+    },
+    "defaultColor": "Arctic White"
+  },
+  {
+    "model": "MG5",
+    "price": "589,900 THB",
+    "fuel": "Petrol",
+    "seats": 5.0,
+    "bodyType": "Sedan",
+    "colorImages": {
+      "Crayon Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/42076c9ed6faafa74fd6ee04e1dfa1a4.png"
+    },
+    "defaultColor": "Crayon Grey"
+  },
+  {
+    "model": "MGS5 EV PLUS",
+    "price": "749,900 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Champagne Titanium": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/dd1145c67ee7e4328ed0a0087d2d68b0.png",
+      "Arctic White": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/8a8c62e51165620e20f7ad2dc544e321.png",
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/0ac7ee4171a2fa0dad1f5c498ee8aa39.png",
+      "Andes Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/75158c8c485ad6cc87f59e5bbc455905.png"
+    },
+    "defaultColor": "Champagne Titanium"
+  }
+]
