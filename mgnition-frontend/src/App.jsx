@@ -138,6 +138,63 @@ function priceToNumber(value = '') {
   return Number.isNaN(num) ? 0 : num;
 }
 
+function buildQuizReasons(answers = {}, car = {}) {
+  const reasons = [];
+  const priceNum = priceToNumber(car.price || car.starting_price || '');
+  const seatsNum = Number(String(car.seats || '').replace(/[^\d]/g, '')) || 0;
+  const fuelPrefRaw = String(answers.fuelType || answers.fuel_type || answers.fuel || '').toLowerCase();
+  const fuelType = String(car.fuel || car.fuel_type || '').toLowerCase();
+
+  const budgetText = String(answers.budget_choice || answers.budget || '').toLowerCase();
+  if (budgetText && priceNum) {
+    if (budgetText.includes('below 700') && priceNum <= 700000) {
+      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} is within your range (below ฿700,000).`);
+    } else if (budgetText.includes('700,000') && budgetText.includes('999') && priceNum >= 700000 && priceNum <= 999999) {
+      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} matches your ฿700,000–฿999,999 range.`);
+    } else if (budgetText.includes('1,000,000') && priceNum >= 1000000 && priceNum <= 1299999) {
+      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} matches your ฿1,000,000–฿1,299,999 range.`);
+    } else if (budgetText.includes('1,300,000') && priceNum >= 1300000) {
+      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} fits your premium budget range.`);
+    }
+  }
+
+  const seatChoice = String(answers.seat_choice || answers.seats || '').toLowerCase();
+  if (seatChoice && seatsNum) {
+    if (seatChoice.includes('2') && seatChoice.includes('seat') && seatsNum === 2) {
+      reasons.push(`Seats: ${seatsNum} seats matches your preference.`);
+    } else if (seatChoice.includes('3-5') && seatsNum >= 3 && seatsNum <= 5) {
+      reasons.push(`Seats: ${seatsNum} seats matches your family use.`);
+    } else if (seatChoice.includes('5') && seatsNum >= 5) {
+      reasons.push(`Seats: ${seatsNum} seats fits your group size.`);
+    }
+  }
+
+  if (fuelPrefRaw) {
+    const fuelMatch =
+      (fuelPrefRaw.includes('ev') && fuelType.includes('ev') && !fuelType.includes('hybrid')) ||
+      (fuelPrefRaw.includes('hybrid') && fuelType.includes('hybrid')) ||
+      (fuelPrefRaw.includes('petrol') && fuelType.includes('petrol')) ||
+      (fuelPrefRaw.includes('diesel') && fuelType.includes('diesel'));
+    if (fuelMatch) {
+      const label = answers.fuelType || answers.fuel_type || answers.fuel || 'Fuel';
+      reasons.push(`Fuel: ${label} aligns with your eco preference.`);
+    }
+  }
+
+  const distance = String(answers.daily_distance || answers.distance || '').toLowerCase();
+  const rangeNum = Number(String(car.rangeKm || car.range_km || '').replace(/[^\d]/g, '')) || 0;
+  if (distance && rangeNum) {
+    reasons.push(`Range: ${rangeNum} km fits your daily distance.`);
+  }
+
+  const usage = Array.isArray(answers.usage) ? answers.usage.join(' ') : String(answers.usage || '');
+  if (usage.toLowerCase().includes('city') && car.bodyType) {
+    reasons.push(`Body type: ${car.bodyType} suits city driving.`);
+  }
+
+  return reasons.filter(Boolean).slice(0, 3);
+}
+
 function extractColorImageMap(row) {
   if (!row || typeof row !== 'object') return {};
   if (row.Color_Images && typeof row.Color_Images === 'object') return row.Color_Images;
@@ -460,6 +517,7 @@ export default function App() {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingMessage, setBookingMessage] = useState('');
   const [bookingError, setBookingError] = useState('');
+  const [confirmedBooking, setConfirmedBooking] = useState(null);
   const [modelFilters, setModelFilters] = useState({
     search: '',
     fuel: 'All',
@@ -474,9 +532,13 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem('mgnition_token') || '');
   const [currentUser, setCurrentUser] = useState(null);
   const isGuest = !token;
-  const visibleNavItems = isGuest
-    ? NAV_ITEMS.filter((item) => !['Recommended Cars', 'Compare', 'Saved Results'].includes(item))
-    : NAV_ITEMS;
+  const isAdmin = Boolean(currentUser?.is_admin);
+  const adminAllowedNav = ['Home', 'Our Models', 'Showrooms', 'About Us'];
+  const visibleNavItems = isAdmin
+    ? adminAllowedNav
+    : isGuest
+      ? NAV_ITEMS.filter((item) => !['Recommended Cars', 'Compare', 'Saved Results'].includes(item))
+      : NAV_ITEMS;
   const hasQuizAnswers = useMemo(() => {
     return Object.values(answers || {}).some((v) => {
       if (Array.isArray(v)) return v.length > 0;
@@ -484,6 +546,22 @@ export default function App() {
     });
   }, [answers]);
   const [savedCars, setSavedCars] = useState([]);
+  const resultReasonMap = useMemo(() => {
+    const map = new Map();
+    results.forEach((r) => {
+      if (r?.variant_key) map.set(r.variant_key, r);
+      if (r?.model) map.set(String(r.model).toLowerCase(), r);
+    });
+    return map;
+  }, [results]);
+  const savedKeySet = useMemo(() => {
+    const set = new Set();
+    savedCars.forEach((c) => {
+      if (c?.variant_key) set.add(c.variant_key);
+      if (c?.model) set.add(String(c.model).toLowerCase());
+    });
+    return set;
+  }, [savedCars]);
   const [authMode, setAuthMode] = useState('login');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -491,11 +569,18 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [resetForm, setResetForm] = useState({ email: '', token: '', new_password: '', confirm_password: '' });
   const [resetMessage, setResetMessage] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirm, setShowSignupConfirm] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [publicPromotions, setPublicPromotions] = useState([]);
+  const [publicBestSellers, setPublicBestSellers] = useState([]);
   const [publicAdminModels, setPublicAdminModels] = useState([]);
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [adminBookings, setAdminBookings] = useState([]);
   const [adminPromotions, setAdminPromotions] = useState([]);
+  const [adminBestSellers, setAdminBestSellers] = useState([]);
   const [adminMessage, setAdminMessage] = useState('');
   const [adminSection, setAdminSection] = useState('overview');
   const [promoForm, setPromoForm] = useState({
@@ -509,6 +594,12 @@ export default function App() {
     variant_name: '',
     start_date: '',
     end_date: ''
+  });
+  const [bestSellerForm, setBestSellerForm] = useState({
+    model_name: '',
+    variant_key: '',
+    variant_name: '',
+    rank: ''
   });
   const [adminModelForm, setAdminModelForm] = useState({
     model: '',
@@ -574,12 +665,38 @@ export default function App() {
   }, [models]);
 
   const bestSellerCars = useMemo(() => {
+    if (publicBestSellers.length) {
+      return publicBestSellers
+        .map((item) => {
+          const row = item.variant_key ? variantByKey.get(item.variant_key) : null;
+          const base = row
+            ? {
+                variant_key: item.variant_key,
+                model: row.Model,
+                variant: row.Variant || item.variant_name || '',
+                year: row.Year || '',
+                price: row.Price_THB ? `${fmtNumber(row.Price_THB)} THB` : '',
+                fuel: row.Fuel_Type || '',
+                seats: row.Seats || '',
+                bodyType: row.Body_Type || '',
+                imagePageUrl: row.Image_URL || ''
+              }
+            : {
+                model: item.model_name || '',
+                variant: item.variant_name || '',
+                variant_key: item.variant_key || '',
+                price: ''
+              };
+          return hydrateSavedCar(base, variantByKey, modelByName);
+        })
+        .filter(Boolean);
+    }
     const wanted = ['MG 3 Hybrid+', 'MG5', 'MG ZS'];
     const list = wanted
       .map((name) => models.find((m) => m.model.toLowerCase().includes(name.toLowerCase())))
       .filter(Boolean);
     return list.length ? list : models.slice(0, 3);
-  }, [models]);
+  }, [publicBestSellers, models, variantByKey, modelByName]);
 
   const promoCars = useMemo(() => {
     const a = models.find((m) => m.model.toLowerCase().includes('vs hev')) || models.find((m) => m.model.toLowerCase().includes('mg5'));
@@ -749,6 +866,20 @@ export default function App() {
       }));
   }, [promoForm.model_name, variantRows]);
 
+  const bestSellerModelOptions = useMemo(() => {
+    return [...new Set(models.map((m) => String(m.model || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }, [models]);
+
+  const bestSellerVariantOptions = useMemo(() => {
+    if (!bestSellerForm.model_name) return [];
+    return variantRows
+      .filter((r) => normModelName(r.Model) === normModelName(bestSellerForm.model_name))
+      .map((r) => ({
+        key: `${r.Model}|${r.Variant || ''}|${r.Year || ''}`,
+        label: `${r.Variant || 'Base'}${r.Year ? ` (${String(r.Year).replace('.0', '')})` : ''}`
+      }));
+  }, [bestSellerForm.model_name, variantRows]);
+
   const bookingModelOptions = useMemo(() => {
     return [...new Set(models.map((m) => String(m.model || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   }, [models]);
@@ -838,9 +969,23 @@ export default function App() {
     return selectedCar;
   }, [selectedCar, selectedVariant, selectedVariantKey]);
 
+  const modelPriceBounds = useMemo(() => {
+    const prices = models.map((m) => priceToNumber(m.price || '')).filter((n) => n > 0);
+    if (!prices.length) return { min: 0, max: 2000000 };
+    return { min: Math.min(...prices), max: Math.max(...prices) };
+  }, [models]);
+
+  const defaultPriceValue = Math.round((modelPriceBounds.min + modelPriceBounds.max) / 2);
+  const modelPriceValue = priceToNumber(modelFilters.maxPrice || defaultPriceValue);
+  const priceSpan = Math.max(modelPriceBounds.max - modelPriceBounds.min, 1);
+  const pricePercent = Math.min(
+    100,
+    Math.max(0, ((modelPriceValue - modelPriceBounds.min) / priceSpan) * 100)
+  );
+
   const filteredModels = useMemo(() => {
     const search = modelFilters.search.trim().toLowerCase();
-    const maxPrice = priceToNumber(modelFilters.maxPrice || '');
+    const maxPrice = priceToNumber(modelFilters.maxPrice || modelPriceValue);
     return models.filter((m) => {
       const modelName = String(m.model || '').toLowerCase();
       const variantName = String(m.variant || '').toLowerCase();
@@ -856,13 +1001,7 @@ export default function App() {
       if (modelFilters.colors.length && !modelFilters.colors.some((c) => modelColors.includes(c))) return false;
       return true;
     });
-  }, [models, modelFilters]);
-
-  const modelPriceBounds = useMemo(() => {
-    const prices = models.map((m) => priceToNumber(m.price || '')).filter((n) => n > 0);
-    if (!prices.length) return { min: 0, max: 2000000 };
-    return { min: Math.min(...prices), max: Math.max(...prices) };
-  }, [models]);
+  }, [models, modelFilters, modelPriceValue]);
 
   const availableFilterColors = useMemo(() => {
     const set = new Set();
@@ -878,6 +1017,13 @@ export default function App() {
       .catch(() => {});
   };
 
+  const refreshPublicBestSellers = () => {
+    fetch(`${API_BASE}/public/best-sellers`)
+      .then((r) => r.json())
+      .then((d) => setPublicBestSellers(d.best_sellers || []))
+      .catch(() => {});
+  };
+
   const refreshAdminPromotions = () => {
     if (!token) return;
     fetch(`${API_BASE}/admin/promotions`, {
@@ -885,6 +1031,16 @@ export default function App() {
     })
       .then((r) => r.json())
       .then((d) => setAdminPromotions(d.promotions || []))
+      .catch(() => {});
+  };
+
+  const refreshAdminBestSellers = () => {
+    if (!token) return;
+    fetch(`${API_BASE}/admin/best-sellers`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => r.json())
+      .then((d) => setAdminBestSellers(d.best_sellers || []))
       .catch(() => {});
   };
 
@@ -902,6 +1058,7 @@ export default function App() {
 
   useEffect(() => {
     refreshPublicPromotions();
+    refreshPublicBestSellers();
 
     fetch(`${API_BASE}/public/admin-models`)
       .then((r) => r.json())
@@ -948,6 +1105,7 @@ export default function App() {
       .catch(() => {});
 
     refreshAdminPromotions();
+    refreshAdminBestSellers();
   }, [page, token, currentUser]);
 
   useEffect(() => {
@@ -955,12 +1113,13 @@ export default function App() {
   }, [page]);
 
   useEffect(() => {
-    if (!isGuest) return;
-    if (page === 'results' || page === 'compare' || page === 'saved') {
-      setActiveNav('Home');
-      setPage('home');
+    if (isGuest || isAdmin) {
+      if (page === 'results' || page === 'compare' || page === 'saved') {
+        setActiveNav('Home');
+        setPage('home');
+      }
     }
-  }, [isGuest, page]);
+  }, [isGuest, isAdmin, page]);
 
   useEffect(() => {
     setPageHistory((prev) => {
@@ -1079,6 +1238,70 @@ export default function App() {
     }
   };
 
+  const handleAddBestSeller = async (e) => {
+    e.preventDefault();
+    if (!token) return;
+    try {
+      const chosenVariant = bestSellerVariantOptions.find((v) => v.key === bestSellerForm.variant_key);
+      const payload = {
+        model_name: bestSellerForm.model_name,
+        variant_key: bestSellerForm.variant_key,
+        variant_name: chosenVariant?.label || bestSellerForm.variant_name || '',
+        rank: bestSellerForm.rank
+      };
+      const res = await fetch(`${API_BASE}/admin/best-sellers`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add best seller.');
+      setAdminBestSellers(data.best_sellers || []);
+      refreshPublicBestSellers();
+      setBestSellerForm({ model_name: '', variant_key: '', variant_name: '', rank: '' });
+      setAdminMessage('Best seller added.');
+    } catch (err) {
+      setAdminMessage(err.message);
+    }
+  };
+
+  const handleSetBestSellerStatus = async (id, active) => {
+    if (!token) return;
+    const res = await fetch(`${API_BASE}/admin/best-sellers/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ active })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setAdminBestSellers(data.best_sellers || []);
+      refreshPublicBestSellers();
+    }
+  };
+
+  const handleBestSellerRankChange = async (id, rank) => {
+    if (!token) return;
+    const res = await fetch(`${API_BASE}/admin/best-sellers/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ rank })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setAdminBestSellers(data.best_sellers || []);
+      refreshPublicBestSellers();
+    }
+  };
+
   const isQuestionAnswered = (q) => {
     if (!q) return false;
     const v = answers[q.key];
@@ -1153,7 +1376,11 @@ export default function App() {
       setAnswers(profileAnswers);
       setSavedCars((data.saved_models || []).map((x) => hydrateSavedCar(x, variantByKey, modelByName)));
       setActiveNav('Home');
-      setPage(Object.keys(profileAnswers).length ? 'home' : 'onboarding');
+      if (data.user?.is_admin) {
+        setPage('home');
+      } else {
+        setPage(Object.keys(profileAnswers).length ? 'home' : 'onboarding');
+      }
     } catch (err) {
       setAuthError(err.message);
     } finally {
@@ -1362,7 +1589,19 @@ export default function App() {
   };
 
   const handleViewDetails = async (car) => {
-    setSelectedCar(car);
+    const fallback =
+      resultReasonMap.get(car?.variant_key || '') ||
+      resultReasonMap.get(String(car?.model || '').toLowerCase()) ||
+      null;
+    const enriched = fallback
+      ? {
+          ...car,
+          explanation: car.explanation || fallback.explanation || null,
+          reason: car.reason || fallback.reason || '',
+          ruleBreakdown: car.ruleBreakdown || fallback.ruleBreakdown || {}
+        }
+      : car;
+    setSelectedCar(enriched);
     setPage('details');
     if (!token) return;
     const payload = {
@@ -1445,6 +1684,7 @@ export default function App() {
     setBookingError('');
     setBookingMessage('');
     try {
+      const wasConfirmed = Boolean(confirmedBooking);
       const chosenVariant = bookingVariantOptions.find((x) => x.key === bookingForm.variant_key);
       const res = await fetch(`${API_BASE}/bookings`, {
         method: 'POST',
@@ -1465,7 +1705,16 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Booking failed.');
-      setBookingMessage('Booking confirmed. Admin can now see this booking.');
+      const snapshot = {
+        showroom: activeShowroom.name,
+        province,
+        model: bookingForm.model,
+        variant: chosenVariant?.label || 'Any variant',
+        notes: bookingForm.notes || '',
+        confirmedAt: new Date().toISOString()
+      };
+      setConfirmedBooking(snapshot);
+      setBookingMessage(wasConfirmed ? 'Booking updated. Admin can now see the latest details.' : 'Booking confirmed. Admin can now see this booking.');
       setPage('booking');
     } catch (err) {
       setBookingError(err.message);
@@ -1491,7 +1740,8 @@ export default function App() {
     { key: 'analytics', label: 'Analytics' },
     { key: 'bookings', label: 'Bookings' },
     { key: 'promotions', label: 'Promotions' },
-    { key: 'models', label: 'Models' }
+    { key: 'models', label: 'Models' },
+    { key: 'best-sellers', label: 'Best Sellers' }
   ];
 
   return (
@@ -1578,12 +1828,14 @@ export default function App() {
                       car={car}
                       onView={handleViewDetails}
                       onCompare={isGuest ? null : handleAddToCompare}
+                      onSave={isGuest ? null : handleSaveModel}
+                      isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                     />
                   ))}
                 </div>
               </>
             )}
-            {!isGuest && !hasQuizAnswers && (
+            {!isGuest && !isAdmin && !hasQuizAnswers && (
               <div className="quiz-banner">
                 <div>
                   <h3>Personalized Recommendations</h3>
@@ -1595,17 +1847,19 @@ export default function App() {
               </div>
             )}
 
-            <div className="right-content">
+            <div className="right-content best-sellers-block">
               <h2>
                 Best <span>sellers</span>
               </h2>
-              <div className="cards two">
+              <div className="cards best-seller-row">
                 {bestSellerCars.map((car) => (
                   <CarCard
                     key={savedCarKey(car)}
                     car={car}
                     onView={handleViewDetails}
                     onCompare={isGuest ? null : handleAddToCompare}
+                    onSave={isGuest ? null : handleSaveModel}
+                    isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                   />
                 ))}
               </div>
@@ -1735,6 +1989,8 @@ export default function App() {
                     car={car}
                     onView={handleViewDetails}
                     onCompare={isGuest ? null : handleAddToCompare}
+                    onSave={isGuest ? null : handleSaveModel}
+                    isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                   />
                 ))}
               </div>
@@ -1885,7 +2141,7 @@ export default function App() {
                 <span>Price Range (THB)</span>
                 <div className="price-range-meta">
                   <span>฿{fmtNumber(modelPriceBounds.min)}</span>
-                  <span>฿{fmtNumber(modelFilters.maxPrice ? Number(modelFilters.maxPrice) : modelPriceBounds.max)}</span>
+                  <span>฿{fmtNumber(modelPriceValue)}</span>
                 </div>
                 <input
                   className="price-range"
@@ -1893,7 +2149,10 @@ export default function App() {
                   min={modelPriceBounds.min}
                   max={modelPriceBounds.max}
                   step={10000}
-                  value={modelFilters.maxPrice ? Number(modelFilters.maxPrice) : modelPriceBounds.max}
+                  value={modelPriceValue}
+                  style={{
+                    background: `linear-gradient(90deg, var(--red) ${pricePercent}%, #e9e6e6 ${pricePercent}%)`
+                  }}
                   onChange={(e) => setModelFilters((p) => ({ ...p, maxPrice: e.target.value }))}
                 />
               </label>
@@ -1975,16 +2234,23 @@ export default function App() {
             <p><b>Available Variants:</b> {selectedModelVariants.length || 'N/A'}</p>
           </div>
 
-          {!!selectedCar.explanation?.top_reasons?.length && (
+          {(() => {
+            const explicitReasons = selectedCar.explanation?.top_reasons || [];
+            const fallbackReasons = buildQuizReasons(answers, selectedCar);
+            const reasons = explicitReasons.length ? explicitReasons : fallbackReasons;
+            return (
+              !!reasons.length && (
             <article className="detail-explainer">
               <h3>Why this was recommended</h3>
               <ul>
-                {selectedCar.explanation.top_reasons.map((reason, idx) => (
+                {reasons.map((reason, idx) => (
                   <li key={`reason-${idx}`}>{reason}</li>
                 ))}
               </ul>
             </article>
-          )}
+              )
+            );
+          })()}
 
           {!!detailPromotions.length && (
             <div className="detail-promotions">
@@ -2135,18 +2401,27 @@ export default function App() {
         <section className="auth-layout">
           <div className="auth-box">
             <button className="back" onClick={handleBack} type="button">←</button>
-            <img src="/mgnition-logo.png" alt="logo" className="auth-logo" />
-            <h3>
-              {authMode === 'login' && 'Log in to your account'}
-              {authMode === 'signup' && 'Create your account'}
-              {authMode === 'reset-request' && 'Reset your password'}
-              {authMode === 'reset-confirm' && 'Set your new password'}
-            </h3>
-            <div className="auth-switch">
-              <button className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')} type="button">Login</button>
-              <button className={authMode === 'signup' ? 'active' : ''} onClick={() => setAuthMode('signup')} type="button">Sign Up</button>
-              <button className={authMode.startsWith('reset') ? 'active' : ''} onClick={() => setAuthMode('reset-request')} type="button">Reset Password</button>
-            </div>
+            <div className="auth-card">
+              <div className="auth-brand">
+                <span className="auth-brand-text">MGNITION</span>
+              </div>
+              <div className="auth-head">
+                <p className="eyebrow">MGNITION ID</p>
+                <h3>
+                  {authMode === 'login' && 'Log in to your account'}
+                  {authMode === 'signup' && 'Create your account'}
+                  {authMode === 'reset-request' && 'Reset your password'}
+                  {authMode === 'reset-confirm' && 'Set your new password'}
+                </h3>
+                <p className="auth-subtitle">
+                  Access personalized recommendations, bookings, and exclusive MG promotions.
+                </p>
+              </div>
+              <div className="auth-switch">
+                <button className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')} type="button">Login</button>
+                <button className={authMode === 'signup' ? 'active' : ''} onClick={() => setAuthMode('signup')} type="button">Sign Up</button>
+                <button className={authMode.startsWith('reset') ? 'active' : ''} onClick={() => setAuthMode('reset-request')} type="button">Reset Password</button>
+              </div>
 
             {authMode === 'login' && (
               <form onSubmit={handleLogin} className="auth-form">
@@ -2155,12 +2430,25 @@ export default function App() {
                   value={loginForm.email}
                   onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
                 />
-                <input
-                  placeholder="Password *"
-                  type="password"
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
-                />
+                <div className="auth-input-row">
+                  <input
+                    placeholder="Password *"
+                    type={showLoginPassword ? 'text' : 'password'}
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                  />
+                  <button
+                    className="auth-toggle"
+                    type="button"
+                    onClick={() => setShowLoginPassword((prev) => !prev)}
+                  >
+                    {showLoginPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <label className="auth-remember">
+                  <input type="checkbox" />
+                  <span>Keep me signed in</span>
+                </label>
                 <button className="btn black full" disabled={authLoading} type="submit">
                   {authLoading ? 'Signing in...' : 'LOGIN'}
                 </button>
@@ -2187,18 +2475,36 @@ export default function App() {
                   value={signupForm.email}
                   onChange={(e) => setSignupForm((p) => ({ ...p, email: e.target.value }))}
                 />
-                <input
-                  placeholder="Password (min 8 chars) *"
-                  type="password"
-                  value={signupForm.password}
-                  onChange={(e) => setSignupForm((p) => ({ ...p, password: e.target.value }))}
-                />
-                <input
-                  placeholder="Confirm Password *"
-                  type="password"
-                  value={signupForm.confirm_password}
-                  onChange={(e) => setSignupForm((p) => ({ ...p, confirm_password: e.target.value }))}
-                />
+                <div className="auth-input-row">
+                  <input
+                    placeholder="Password (min 8 chars) *"
+                    type={showSignupPassword ? 'text' : 'password'}
+                    value={signupForm.password}
+                    onChange={(e) => setSignupForm((p) => ({ ...p, password: e.target.value }))}
+                  />
+                  <button
+                    className="auth-toggle"
+                    type="button"
+                    onClick={() => setShowSignupPassword((prev) => !prev)}
+                  >
+                    {showSignupPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <div className="auth-input-row">
+                  <input
+                    placeholder="Confirm Password *"
+                    type={showSignupConfirm ? 'text' : 'password'}
+                    value={signupForm.confirm_password}
+                    onChange={(e) => setSignupForm((p) => ({ ...p, confirm_password: e.target.value }))}
+                  />
+                  <button
+                    className="auth-toggle"
+                    type="button"
+                    onClick={() => setShowSignupConfirm((prev) => !prev)}
+                  >
+                    {showSignupConfirm ? 'Hide' : 'Show'}
+                  </button>
+                </div>
                 <button className="btn black full" disabled={authLoading} type="submit">
                   {authLoading ? 'Creating account...' : 'CREATE ACCOUNT'}
                 </button>
@@ -2225,18 +2531,36 @@ export default function App() {
                   value={resetForm.token}
                   onChange={(e) => setResetForm((p) => ({ ...p, token: e.target.value }))}
                 />
-                <input
-                  placeholder="New Password *"
-                  type="password"
-                  value={resetForm.new_password}
-                  onChange={(e) => setResetForm((p) => ({ ...p, new_password: e.target.value }))}
-                />
-                <input
-                  placeholder="Confirm New Password *"
-                  type="password"
-                  value={resetForm.confirm_password}
-                  onChange={(e) => setResetForm((p) => ({ ...p, confirm_password: e.target.value }))}
-                />
+                <div className="auth-input-row">
+                  <input
+                    placeholder="New Password *"
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetForm.new_password}
+                    onChange={(e) => setResetForm((p) => ({ ...p, new_password: e.target.value }))}
+                  />
+                  <button
+                    className="auth-toggle"
+                    type="button"
+                    onClick={() => setShowResetPassword((prev) => !prev)}
+                  >
+                    {showResetPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <div className="auth-input-row">
+                  <input
+                    placeholder="Confirm New Password *"
+                    type={showResetConfirm ? 'text' : 'password'}
+                    value={resetForm.confirm_password}
+                    onChange={(e) => setResetForm((p) => ({ ...p, confirm_password: e.target.value }))}
+                  />
+                  <button
+                    className="auth-toggle"
+                    type="button"
+                    onClick={() => setShowResetConfirm((prev) => !prev)}
+                  >
+                    {showResetConfirm ? 'Hide' : 'Show'}
+                  </button>
+                </div>
                 <button className="btn black full" disabled={authLoading} type="submit">
                   {authLoading ? 'Updating password...' : 'UPDATE PASSWORD'}
                 </button>
@@ -2244,54 +2568,130 @@ export default function App() {
             )}
             {authError && <p className="auth-error">{authError}</p>}
             {resetMessage && <p className="auth-ok">{resetMessage}</p>}
+            </div>
           </div>
-          <div className="auth-art" style={{ backgroundImage: `url(${authCarImage})` }} />
+          <div className="auth-art" style={{ backgroundImage: `url(${authCarImage})` }}>
+            <div className="auth-art-overlay">
+              <p className="auth-art-eyebrow">MG Heritage</p>
+              <h2>Drive the future with confidence</h2>
+              <p>
+                Join MGNITION for tailored model recommendations, showroom booking, and premium offers.
+              </p>
+            </div>
+          </div>
         </section>
       )}
 
       {page === 'showrooms' && (
-        <section className="page-section center">
-          <h2>Enter your province so that we can connect you with the nearest MG Show Room.</h2>
-          <div className="showroom-filters">
-            <select value={province} onChange={(e) => setProvince(e.target.value)}>
-              {provinceOptions.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-            <input
-              placeholder="Postal code (optional)"
-              value={showroomPostal}
-              onChange={(e) => setShowroomPostal(e.target.value)}
-            />
-            <select value={showroomModelPref} onChange={(e) => setShowroomModelPref(e.target.value)}>
-              <option value="">Any model</option>
-              {showroomModelOptions.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+        <section className="page-section center showroom-page">
+          <div className="showroom-hero">
+            <div>
+              <p className="eyebrow">Showroom Locator</p>
+              <h2>Find a nearby MG showroom</h2>
+              <p className="showroom-subtitle">
+                Enter your province and optional postal code to match the nearest MG showroom and book a consultation.
+              </p>
+            </div>
+            <div className="showroom-hero-card">
+              <span className="hero-label">Service Hours</span>
+              <strong>Daily 9:00 – 19:00</strong>
+              <span className="hero-note">Support for test drives and promotions</span>
+            </div>
           </div>
-          <button
-            className="btn black"
-            onClick={() => {
-              setSelectedShowroom((prev) => prev || smartShowrooms[0] || null);
-              setPage('map');
-            }}
-            type="button"
-          >
-            FIND SHOW ROOM
-          </button>
+
+          <div className="showroom-locator-card">
+            <div className="showroom-filters">
+              <label className="showroom-field">
+                <span>Province</span>
+                <select value={province} onChange={(e) => setProvince(e.target.value)}>
+                  {provinceOptions.map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="showroom-field">
+                <span>Postal code</span>
+                <input
+                  placeholder="e.g. 10110"
+                  value={showroomPostal}
+                  onChange={(e) => setShowroomPostal(e.target.value)}
+                />
+              </label>
+              <label className="showroom-field">
+                <span>Preferred model</span>
+                <select value={showroomModelPref} onChange={(e) => setShowroomModelPref(e.target.value)}>
+                  <option value="">Any model</option>
+                  {showroomModelOptions.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="showroom-locator-actions">
+              <button
+                className="btn black"
+                onClick={() => {
+                  setSelectedShowroom((prev) => prev || smartShowrooms[0] || null);
+                  setPage('map');
+                }}
+                type="button"
+              >
+                Find Showroom
+              </button>
+              <span className="showroom-meta">
+                {smartShowrooms.length} showroom{smartShowrooms.length === 1 ? '' : 's'} found in {province}
+              </span>
+            </div>
+          </div>
+
           {smartShowrooms.length > 0 && (
             <div className="showroom-preview">
               {smartShowrooms.slice(0, 3).map((s) => (
                 <article key={s.id} className="showroom-card">
                   <div className="showroom-card-head">
-                    <h4>{s.name}</h4>
-                    <span>{s.smartDistanceKm || '-'} KM</span>
+                    <div>
+                      <span className="showroom-tag">MG Partner</span>
+                      <h4>{s.name}</h4>
+                      <p className="muted-text">{s.address}</p>
+                    </div>
+                    <div className="showroom-score">
+                      <span className="showroom-distance">{s.smartDistanceKm || '-'} km</span>
+                      <span className="showroom-match">Match {s.matchScore || 0}</span>
+                    </div>
                   </div>
-                  <p><b>Smart Match:</b> {s.matchScore || 0}</p>
-                  <p>{s.address}</p>
-                  <p>Phone: {s.phone || '-'}</p>
-                  <p className="muted-text">{(s.reasons || []).join(' • ')}</p>
+                  <div className="showroom-card-meta">
+                    <div>
+                      <span className="meta-label">Phone</span>
+                      <strong>{s.phone || '-'}</strong>
+                    </div>
+                    <div className="meta-tags">
+                      {(s.reasons || []).slice(0, 2).map((reason) => (
+                        <span key={reason} className="tag-pill">{reason}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="showroom-actions">
+                    <button
+                      className="btn light"
+                      onClick={() => {
+                        setSelectedShowroom(s);
+                        setPage('map');
+                      }}
+                      type="button"
+                    >
+                      View details
+                    </button>
+                    <button
+                      className="btn black"
+                      onClick={() => {
+                        setSelectedShowroom(s);
+                        setPage('booking');
+                      }}
+                      type="button"
+                    >
+                      Book consultation
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -2345,59 +2745,128 @@ export default function App() {
       )}
 
       {page === 'booking' && (
-        <section className="page-section">
-          <h1>Booking Confirmed!</h1>
-          <p>Choose your preferred showroom and MG model/variant, then submit your consultation request.</p>
-          <div className="booking-form">
-            <label>Selected Showroom</label>
-            <input value={selectedShowroom?.name || smartShowrooms[0]?.name || filteredShowrooms[0]?.name || ''} readOnly />
-            <label>Province</label>
-            <input value={province} readOnly />
-            <label>Car Model</label>
-            <select
-              value={bookingForm.model}
-              onChange={(e) => setBookingForm((p) => ({ ...p, model: e.target.value, variant_key: '' }))}
-            >
-              <option value="">Select model</option>
-              {bookingModelOptions.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-            <label>Variant (optional)</label>
-            <select
-              value={bookingForm.variant_key}
-              onChange={(e) => setBookingForm((p) => ({ ...p, variant_key: e.target.value }))}
-              disabled={!bookingForm.model}
-            >
-              <option value="">Any variant</option>
-              {bookingVariantOptions.map((v) => (
-                <option key={v.key} value={v.key}>{v.label}</option>
-              ))}
-            </select>
-            <label>Notes (optional)</label>
-            <input
-              value={bookingForm.notes}
-              onChange={(e) => setBookingForm((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Preferred contact time, extra requests..."
-            />
-            <button className="btn black" onClick={handleBookConsultation} type="button" disabled={bookingLoading}>
-              {bookingLoading ? 'Submitting...' : 'Confirm Booking'}
-            </button>
-            {bookingError && <p className="auth-error">{bookingError}</p>}
-            {bookingMessage && <p className="auth-ok">{bookingMessage}</p>}
-          </div>
-          <div className="booking-box">
-            <h3>Booking details</h3>
-            <p>Name: {currentUser?.full_name || 'Guest'}</p>
-            <p>Phone: {currentUser?.phone || '-'}</p>
-            <p>Showroom Branch: {selectedShowroom?.name || smartShowrooms[0]?.name || filteredShowrooms[0]?.name || 'MG Rama 4 showroom'}</p>
-            <p>City: {province}</p>
-            <p>Model: {bookingForm.model || '-'}</p>
-            <p>Variant: {bookingVariantOptions.find((v) => v.key === bookingForm.variant_key)?.label || 'Any variant'}</p>
-          </div>
-          <button className="btn light" onClick={() => setPage('home')} type="button">
-            Done
-          </button>
+        <section className="page-section booking-page">
+          {(() => {
+            const showroomName = selectedShowroom?.name || smartShowrooms[0]?.name || filteredShowrooms[0]?.name || '';
+            const variantLabel = bookingVariantOptions.find((v) => v.key === bookingForm.variant_key)?.label || 'Any variant';
+            const summaryItems = [
+              { key: 'user_name', label: 'Name', value: currentUser?.full_name || 'Guest' },
+              { key: 'user_phone', label: 'Phone', value: currentUser?.phone || '-' },
+              { key: 'showroom', label: 'Showroom', value: showroomName },
+              { key: 'province', label: 'Province', value: province },
+              { key: 'model', label: 'Model', value: bookingForm.model },
+              { key: 'variant', label: 'Variant', value: variantLabel },
+              { key: 'notes', label: 'Notes', value: bookingForm.notes }
+            ];
+            const statusFor = (key, value) => {
+              const val = String(value || '').trim();
+              if (!val) return 'missing';
+              if (!confirmedBooking) return 'pending';
+              const confirmedVal = String(confirmedBooking[key] || '').trim();
+              if (!confirmedVal) return 'pending';
+              return confirmedVal === val ? 'confirmed' : 'edited';
+            };
+            const itemsWithStatus = summaryItems.map((item) => ({
+              ...item,
+              status: statusFor(item.key, item.value)
+            }));
+            const hasChanges = confirmedBooking ? itemsWithStatus.some((x) => x.status === 'edited') : true;
+            const confirmLabel = bookingLoading
+              ? 'Submitting...'
+              : confirmedBooking
+                ? (hasChanges ? 'Update Booking' : 'Booking Confirmed')
+                : 'Confirm Booking';
+
+            return (
+              <>
+                <div className="booking-header">
+                  <div>
+                    <p className="eyebrow">Consultation Request</p>
+                    <h1>Book a Showroom Consultation</h1>
+                    <p className="booking-subtitle">
+                      Review your details below. Any edits will update the status icons in the summary card.
+                    </p>
+                  </div>
+                  <div className={`booking-status ${confirmedBooking ? 'confirmed' : 'draft'}`}>
+                    <span>{confirmedBooking ? 'Confirmed' : 'Draft'}</span>
+                    <small>{confirmedBooking ? 'Details saved' : 'Not submitted yet'}</small>
+                  </div>
+                </div>
+
+                <div className="booking-grid">
+                  <div className="booking-form-card">
+                    <div className="booking-form">
+                      <label>Selected Showroom</label>
+                      <input value={showroomName} readOnly />
+                      <label>Province</label>
+                      <input value={province} readOnly />
+                      <label>Car Model</label>
+                      <select
+                        value={bookingForm.model}
+                        onChange={(e) => setBookingForm((p) => ({ ...p, model: e.target.value, variant_key: '' }))}
+                      >
+                        <option value="">Select model</option>
+                        {bookingModelOptions.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      <label>Variant (optional)</label>
+                      <select
+                        value={bookingForm.variant_key}
+                        onChange={(e) => setBookingForm((p) => ({ ...p, variant_key: e.target.value }))}
+                        disabled={!bookingForm.model}
+                      >
+                        <option value="">Any variant</option>
+                        {bookingVariantOptions.map((v) => (
+                          <option key={v.key} value={v.key}>{v.label}</option>
+                        ))}
+                      </select>
+                      <label>Notes (optional)</label>
+                      <input
+                        value={bookingForm.notes}
+                        onChange={(e) => setBookingForm((p) => ({ ...p, notes: e.target.value }))}
+                        placeholder="Preferred contact time, extra requests..."
+                      />
+                    </div>
+                    <div className="booking-actions">
+                      <button
+                        className="btn black"
+                        onClick={handleBookConsultation}
+                        type="button"
+                        disabled={bookingLoading || (confirmedBooking && !hasChanges)}
+                      >
+                        {confirmLabel}
+                      </button>
+                      {bookingError && <p className="auth-error">{bookingError}</p>}
+                      {bookingMessage && <p className="auth-ok">{bookingMessage}</p>}
+                    </div>
+                  </div>
+
+                  <div className="booking-summary">
+                    <h3>Booking Summary</h3>
+                    <p className="muted-text">Live preview of the details you entered.</p>
+                    <ul className="summary-list">
+                      {itemsWithStatus.map((item) => (
+                        <li key={item.key} className="summary-item">
+                          <span className={`summary-icon ${item.status}`} />
+                          <div>
+                            <span className="summary-label">{item.label}</span>
+                            <strong className="summary-value">{item.value || '—'}</strong>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="booking-footer">
+                  <button className="btn light" onClick={() => setPage('showrooms')} type="button">
+                    Done
+                  </button>
+                </div>
+              </>
+            );
+          })()}
         </section>
       )}
 
@@ -2816,6 +3285,94 @@ export default function App() {
               </article>
             )}
 
+            {adminSection === 'best-sellers' && (
+              <>
+                <article className="admin-card">
+                  <div className="admin-card-head">
+                    <h3>Manage Best Sellers</h3>
+                  </div>
+                  <form className="auth-form" onSubmit={handleAddBestSeller}>
+                    <select
+                      value={bestSellerForm.model_name}
+                      onChange={(e) => setBestSellerForm((p) => ({ ...p, model_name: e.target.value, variant_key: '', variant_name: '' }))}
+                      required
+                    >
+                      <option value="">Select Model *</option>
+                      {bestSellerModelOptions.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={bestSellerForm.variant_key}
+                      onChange={(e) => setBestSellerForm((p) => ({ ...p, variant_key: e.target.value }))}
+                      disabled={!bestSellerForm.model_name || !bestSellerVariantOptions.length}
+                    >
+                      <option value="">Any variant</option>
+                      {bestSellerVariantOptions.map((v) => (
+                        <option key={v.key} value={v.key}>{v.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      placeholder="Rank (1 = highest)"
+                      value={bestSellerForm.rank}
+                      onChange={(e) => setBestSellerForm((p) => ({ ...p, rank: e.target.value }))}
+                    />
+                    <button className="btn black full" type="submit">Add Best Seller</button>
+                  </form>
+                </article>
+
+                <article className="admin-card">
+                  <div className="admin-card-head">
+                    <h3>Best Seller List</h3>
+                  </div>
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Model</th>
+                          <th>Variant</th>
+                          <th>Rank</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminBestSellers.map((row) => (
+                          <tr key={`best-${row.id}`}>
+                            <td>{row.model_name}</td>
+                            <td>{row.variant_name || (row.variant_key ? variantLabelFromKey(row.variant_key) : '-')}</td>
+                            <td>
+                              <input
+                                className="admin-rank-input"
+                                type="number"
+                                min="1"
+                                value={row.rank || 1}
+                                onChange={(e) => handleBestSellerRankChange(row.id, e.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <select
+                                className="admin-status"
+                                value={row.active ? 'active' : 'inactive'}
+                                onChange={(e) => handleSetBestSellerStatus(row.id, e.target.value === 'active')}
+                              >
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                        {!adminBestSellers.length && (
+                          <tr>
+                            <td colSpan={4}>No best sellers yet.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              </>
+            )}
+
             {adminMessage && <p className="auth-ok">{adminMessage}</p>}
           </main>
         </div>
@@ -2858,7 +3415,7 @@ function TopBar({ active, navItems, onNav, onAuth, currentUser, onLogout }) {
   );
 }
 
-function CarCard({ car, onView, onCompare }) {
+function CarCard({ car, onView, onCompare, onSave, isSaved }) {
   const reasons = (car.explanation?.top_reasons || []).slice(0, 2);
   const meta = [
     car.fuel && String(car.fuel),
@@ -2867,6 +3424,19 @@ function CarCard({ car, onView, onCompare }) {
   ].filter(Boolean);
   return (
     <article className="car-card">
+      {onSave && (
+        <button
+          className={isSaved ? 'save-icon saved' : 'save-icon'}
+          type="button"
+          title="Save to My Account"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSave(car);
+          }}
+        >
+          {isSaved ? '★' : '☆'}
+        </button>
+      )}
       <img src={modelImage(car)} alt={car.model} />
       <h3>{car.model}</h3>
       {car.variant && <p className="car-card-variant">Variant: {car.variant}</p>}

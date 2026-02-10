@@ -29,6 +29,19 @@ try:
 except Exception:
     SKLEARN_AVAILABLE = False
 
+COSINE_IMPORT_ERROR = ""
+try:
+    import pandas as pd
+
+    from cosine_recommender import FEATURE_ORDER as COSINE_FEATURE_ORDER
+    from cosine_recommender import score_cars_with_cosine
+
+    COSINE_AVAILABLE = True
+except Exception as e:
+    COSINE_AVAILABLE = False
+    COSINE_IMPORT_ERROR = str(e)
+    COSINE_FEATURE_ORDER = []
+
 app = Flask(__name__)
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*").strip()
 allowed_origins = "*" if allowed_origins_env == "*" else [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
@@ -362,6 +375,18 @@ def init_db():
                 updated_at TEXT NOT NULL
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS best_sellers (
+                id BIGSERIAL PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                variant_name TEXT,
+                variant_key TEXT,
+                rank INTEGER NOT NULL DEFAULT 1,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_by BIGINT,
+                created_at TEXT NOT NULL
+            )
+            """,
         ]
         for stmt in statements:
             db.execute(stmt)
@@ -493,6 +518,17 @@ def init_db():
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS best_sellers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_name TEXT NOT NULL,
+                variant_name TEXT,
+                variant_key TEXT,
+                rank INTEGER NOT NULL DEFAULT 1,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_by INTEGER,
+                created_at TEXT NOT NULL
+            );
             """
         )
 
@@ -509,6 +545,7 @@ def init_db():
         ensure_pg_id_sequence_default(db, "promotions")
         ensure_pg_id_sequence_default(db, "admin_models")
         ensure_pg_id_sequence_default(db, "bookings")
+        ensure_pg_id_sequence_default(db, "best_sellers")
 
     admin_count = db.execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0]
     if admin_count == 0:
@@ -722,6 +759,122 @@ def variant_lookup():
     return {v["variant_key"]: v for v in get_all_variants()}
 
 
+def _as_list(v):
+    if isinstance(v, list):
+        return [clean_str(x) for x in v if clean_str(x)]
+    if isinstance(v, str):
+        return [x.strip() for x in v.split(",") if x.strip()]
+    c = clean_str(v)
+    return [c] if c else []
+
+
+def _is_ev_preference(v):
+    t = normalize_text(v)
+    if not t:
+        return 0
+    if "ev" in t or "electric" in t:
+        if "hev" in t or "hybrid" in t:
+            return 0
+        return 1
+    return 0
+
+
+def map_answers_to_cosine_input(answers):
+    budget_choice = clean_str(answers.get("budget_choice")) or clean_str(answers.get("budget"))
+    seat_choice = clean_str(answers.get("seat_choice")) or clean_str(answers.get("seats"))
+    occupation = clean_str(answers.get("occupation")) or "Others"
+    hobbies = _as_list(answers.get("hobbies"))
+    usage_raw = answers.get("usage", [])
+    usage = _as_list(usage_raw) if isinstance(usage_raw, str) else _as_list(usage_raw)
+    daily_distance = clean_str(answers.get("daily_distance")) or clean_str(answers.get("distance")) or "Medium commute (30-80 km)"
+
+    fuel_type_ev_raw = answers.get("fuel_type_EV")
+    if fuel_type_ev_raw is None:
+        fuel_type_ev = _is_ev_preference(answers.get("fuelType") or answers.get("fuel_type"))
+    else:
+        fuel_type_ev = int(safe_float(fuel_type_ev_raw, 0) or 0)
+
+    out = {
+        "budget_choice": budget_choice,
+        "seat_choice": seat_choice,
+        "fuel_type_EV": fuel_type_ev,
+        "occupation": occupation,
+        "hobbies": hobbies,
+        "usage": usage,
+        "daily_distance": daily_distance,
+    }
+
+    if answers.get("max_price_thb") is not None:
+        out["max_price_thb"] = safe_float(answers.get("max_price_thb"), None)
+    if answers.get("min_seats") is not None:
+        out["min_seats"] = int(safe_float(answers.get("min_seats"), 0) or 0)
+    if answers.get("max_seats") is not None:
+        out["max_seats"] = int(safe_float(answers.get("max_seats"), 0) or 0)
+    return out
+
+
+COSINE_REASON_LABELS = {
+    "price_weight": "Budget alignment",
+    "hp_weight": "Power preference alignment",
+    "seats_weight": "Seat capacity alignment",
+    "range_weight": "Driving range alignment",
+    "cargo_weight": "Cargo space alignment",
+    "torque_weight": "Torque/acceleration alignment",
+    "suv_pref": "SUV body type alignment",
+    "sedan_pref": "Sedan/Hatchback body type alignment",
+    "fuel_ev_weight": "EV fuel alignment",
+    "fuel_hev_weight": "Hybrid fuel alignment",
+    "fuel_ice_weight": "Petrol/Diesel fuel alignment",
+    "efficiency_weight": "Efficiency alignment",
+}
+
+
+def build_cosine_explanation(car_row, user_profile, final_score, answers=None):
+    contributions = []
+    for key in COSINE_FEATURE_ORDER:
+        u = safe_float(user_profile.get(key), 0)
+        c = safe_float(car_row.get(key), 0)
+        contributions.append((key, u * c))
+    contributions.sort(key=lambda x: x[1], reverse=True)
+
+    top = [(k, v) for k, v in contributions if v > 0][:3]
+    factors = []
+    for key, val in top:
+        label = COSINE_REASON_LABELS.get(key, key)
+        if key == "price_weight":
+            detail = f"Price {fmt_price(car_row.get('price_thb'))} aligns with your budget preference."
+        elif key == "seats_weight":
+            detail = f"Seat capacity ({int(safe_float(car_row.get('seats'), 0) or 0)} seats) aligns with your need."
+        elif key == "fuel_ev_weight":
+            detail = f"Fuel type ({clean_str(car_row.get('fuel_type')) or 'N/A'}) aligns with EV preference."
+        elif key == "range_weight":
+            detail = f"Range ({int(safe_float(car_row.get('range_km'), 0) or 0)} km) aligns with your daily distance."
+        elif key == "cargo_weight":
+            detail = f"Cargo capacity ({int(safe_float(car_row.get('cargo_liters'), 0) or 0)} L) aligns with lifestyle needs."
+        else:
+            detail = f"{label} contributed strongly to the cosine similarity score."
+        factors.append(
+            {
+                "key": key,
+                "label": label,
+                "points": round(float(val), 4),
+                "detail": detail,
+            }
+        )
+
+    top_reasons = build_template_reasons(answers or {}, car_row)
+    if not top_reasons:
+        top_reasons = ["Matched overall preferences from your quiz."]
+
+    return {
+        "top_reasons": top_reasons,
+        "factors": factors,
+        "rule_score": None,
+        "ml_score": None,
+        "final_score": round(float(final_score), 4),
+    }
+
+
 def rule_breakdown(variant, answers):
     points = {
         "fuel_fit": 0.0,
@@ -785,6 +938,72 @@ def rule_score(variant, answers):
     return total
 
 
+def build_template_reasons(answers, variant):
+    reasons = []
+    price = safe_float(variant.get("price_thb"), 0)
+    fuel_type = normalize_text(variant.get("fuel_type"))
+    seats = int(safe_float(variant.get("seats"), 0) or 0)
+
+    budget_text = normalize_text(answers.get("budget_choice") or answers.get("budget"))
+    max_price = answers.get("max_price_thb")
+    if max_price is not None:
+        max_price_val = safe_float(max_price, 0)
+        if price and price <= max_price_val:
+            reasons.append(f"Budget fit: {fmt_price(price)} is within your max price.")
+    elif budget_text:
+        if "below 700" in budget_text and price and price <= 700000:
+            reasons.append(f"Budget fit: {fmt_price(price)} is within your range (below ฿700,000).")
+        elif "700,000" in budget_text and "999" in budget_text and 700000 <= price <= 999999:
+            reasons.append(f"Budget fit: {fmt_price(price)} matches your ฿700,000–฿999,999 range.")
+        elif "1,000,000" in budget_text and 1000000 <= price <= 1299999:
+            reasons.append(f"Budget fit: {fmt_price(price)} matches your ฿1,000,000–฿1,299,999 range.")
+        elif "1,300,000" in budget_text and price >= 1300000:
+            reasons.append(f"Budget fit: {fmt_price(price)} fits your premium budget range.")
+
+    seat_choice = normalize_text(answers.get("seat_choice") or answers.get("seats"))
+    if seat_choice:
+        if "2" in seat_choice and "seat" in seat_choice and seats == 2:
+            reasons.append(f"Seats: {seats} seats matches your preference.")
+        elif "3-5" in seat_choice and 3 <= seats <= 5:
+            reasons.append(f"Seats: {seats} seats matches your family use.")
+        elif ("5+" in seat_choice or "5" in seat_choice) and seats >= 5:
+            reasons.append(f"Seats: {seats} seats fits your group size.")
+
+    fuel_pref = normalize_text(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+    if fuel_pref:
+        fuel_match = fuel_pref.split(" ")[0] in fuel_type
+        if fuel_pref.startswith("ev") and "ev" in fuel_type and "hybrid" not in fuel_type:
+            fuel_match = True
+        if fuel_pref.startswith("hybrid") and "hybrid" in fuel_type:
+            fuel_match = True
+        if fuel_match:
+            label = clean_str(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+            reasons.append(f"Fuel: {label} aligns with your eco preference.")
+
+    if len(reasons) < 3:
+        distance = normalize_text(answers.get("daily_distance") or answers.get("distance"))
+        range_km = int(safe_float(variant.get("range_km"), 0) or 0)
+        if distance and range_km:
+            reasons.append(f"Range: {range_km} km fits your daily distance.")
+
+    if len(reasons) < 3:
+        usage_val = answers.get("usage")
+        if isinstance(usage_val, list):
+            usage_val = " ".join([clean_str(x) for x in usage_val if clean_str(x)])
+        usage = normalize_text(usage_val)
+        cargo = int(safe_float(variant.get("cargo_liters"), 0) or 0)
+        body = normalize_text(variant.get("body_type"))
+        if "cargo" in usage and cargo >= 400:
+            reasons.append(f"Cargo: {cargo} L supports your practical use.")
+        elif "city" in usage and body:
+            reasons.append(f"Body type: {variant.get('body_type')} suits city driving.")
+
+    if not reasons:
+        reasons.append("Matched overall preferences from your quiz.")
+
+    return reasons[:3]
+
+
 def explain_variant_reasons(variant, answers, breakdown, rule_total, ml_score, final_score):
     labels = {
         "fuel_fit": "Fuel type match",
@@ -816,7 +1035,10 @@ def explain_variant_reasons(variant, answers, breakdown, rule_total, ml_score, f
         factors.append(item)
         top_reasons.append(f"{item['label']}: {item['detail']}")
 
-    if not top_reasons:
+    template_reasons = build_template_reasons(answers, variant)
+    if template_reasons:
+        top_reasons = template_reasons
+    elif not top_reasons:
         top_reasons.append("No strong quiz match found, ranked by closest overall fit.")
 
     return {
@@ -1368,6 +1590,8 @@ def create_booking():
 @app.post("/recommend")
 def recommend():
     answers = request.get_json(silent=True) or {}
+    if not isinstance(answers, dict):
+        answers = {}
 
     token = get_token_from_header()
     user = get_user_by_token(token)
@@ -1375,7 +1599,57 @@ def recommend():
     if user_id and isinstance(answers, dict):
         upsert_profile(user_id, answers)
 
-    top = recommend_variants(answers, top_k=6)
+    top = []
+    if COSINE_AVAILABLE:
+        car_df = pd.DataFrame(get_all_variants())
+        cosine_input = map_answers_to_cosine_input(answers)
+        ranked_df, user_profile, _feature_cols, msg = score_cars_with_cosine(car_df, cosine_input, debug=False)
+
+        if msg:
+            return jsonify({"recommendations": [], "message": msg, "engine": "cosine_similarity"})
+
+        ranked_df = ranked_df.sort_values("similarity_score", ascending=False).head(6)
+
+        def _safe_text(v):
+            if v is None:
+                return ""
+            if isinstance(v, float) and v != v:
+                return ""
+            s = str(v).strip()
+            return "" if s.lower() == "nan" else s
+
+        for _, row in ranked_df.iterrows():
+            r = row.to_dict()
+            score = round(float(safe_float(r.get("similarity_score"), 0)), 6)
+            explanation = build_cosine_explanation(r, user_profile, score, answers)
+            top.append(
+                {
+                    "variant_key": clean_str(r.get("variant_key")),
+                    "model": clean_str(r.get("model")),
+                    "variant": clean_str(r.get("variant")),
+                    "year": clean_str(r.get("year")),
+                    "starting_price": _safe_text(r.get("starting_price")) or fmt_price(r.get("price_thb")),
+                    "price_thb": safe_float(r.get("price_thb"), 0),
+                    "fuel_type": clean_str(r.get("fuel_type")),
+                    "seats": int(safe_float(r.get("seats"), 0) or 0),
+                    "body_type": clean_str(r.get("body_type")),
+                    "range_km": safe_float(r.get("range_km"), 0),
+                    "horsepower_hp": safe_float(r.get("horsepower_hp"), 0),
+                    "torque_nm": safe_float(r.get("torque_nm"), 0),
+                    "image_url": _safe_text(r.get("image_url")),
+                    "color_images": r.get("color_images") if isinstance(r.get("color_images"), dict) else {},
+                    "default_color": _safe_text(r.get("default_color")),
+                    "rule_score": None,
+                    "ml_score": None,
+                    "score": score,
+                    "reason": "Cosine similarity from quiz profile + hard constraints",
+                    "explanation": explanation,
+                    "rule_breakdown": {f["key"]: f["points"] for f in explanation.get("factors", [])},
+                }
+            )
+    else:
+        top = recommend_variants(answers, top_k=6)
+
     log_impressions(user_id, answers, top)
 
     out = []
@@ -1398,13 +1672,20 @@ def recommend():
                 "color_images": r.get("color_images", {}),
                 "default_color": r.get("default_color", ""),
                 "score": r["score"],
-                "reason": "Hybrid ranking from quiz + behavior learning",
+                "reason": r.get("reason") or "Hybrid ranking from quiz + behavior learning",
                 "explanation": r.get("explanation", {}),
                 "rule_breakdown": r.get("rule_breakdown", {}),
             }
         )
 
-    return jsonify({"recommendations": out})
+    payload = {"recommendations": out}
+    if COSINE_AVAILABLE:
+        payload["engine"] = "cosine_similarity"
+    else:
+        payload["engine"] = "hybrid_rule_ml_fallback"
+        if COSINE_IMPORT_ERROR:
+            payload["cosine_error"] = COSINE_IMPORT_ERROR
+    return jsonify(payload)
 
 
 @app.get("/public/promotions")
@@ -1452,6 +1733,19 @@ def public_admin_models():
             }
         )
     return jsonify({"models": models})
+
+
+@app.get("/public/best-sellers")
+def public_best_sellers():
+    rows = get_db().execute(
+        """
+        SELECT id, model_name, variant_name, variant_key, rank
+        FROM best_sellers
+        WHERE active = 1
+        ORDER BY rank ASC, id ASC
+        """
+    ).fetchall()
+    return jsonify({"best_sellers": [dict(r) for r in rows]})
 
 
 @app.get("/admin/analytics")
@@ -1589,6 +1883,74 @@ def admin_promotions():
         """
     ).fetchall()
     return jsonify({"promotions": [dict(r) for r in rows]})
+
+
+@app.get("/admin/best-sellers")
+@admin_required
+def admin_best_sellers():
+    rows = get_db().execute(
+        """
+        SELECT id, model_name, variant_name, variant_key, rank, active, created_at
+        FROM best_sellers
+        ORDER BY rank ASC, id ASC
+        """
+    ).fetchall()
+    return jsonify({"best_sellers": [dict(r) for r in rows]})
+
+
+@app.post("/admin/best-sellers")
+@admin_required
+def add_best_seller():
+    payload = request.get_json(silent=True) or {}
+    model_name = clean_str(payload.get("model_name"))
+    if not model_name:
+        return jsonify({"error": "model_name is required."}), 400
+
+    variant_key = clean_str(payload.get("variant_key"))
+    variant_name = clean_str(payload.get("variant_name"))
+    rank = int(safe_float(payload.get("rank"), 1) or 1)
+
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO best_sellers (model_name, variant_name, variant_key, rank, active, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (model_name, variant_name, variant_key, rank, 1, g.current_user["id"], utc_now_iso()),
+    )
+    db.commit()
+    return admin_best_sellers()
+
+
+@app.patch("/admin/best-sellers/<int:best_id>")
+@admin_required
+def update_best_seller(best_id):
+    payload = request.get_json(silent=True) or {}
+    active = payload.get("active")
+    rank = payload.get("rank")
+    updates = []
+    params = []
+    if active is not None:
+        updates.append("active = ?")
+        params.append(1 if bool(active) else 0)
+    if rank is not None:
+        updates.append("rank = ?")
+        params.append(int(safe_float(rank, 1) or 1))
+    if not updates:
+        return jsonify({"error": "No valid fields to update."}), 400
+    params.append(best_id)
+    get_db().execute(f"UPDATE best_sellers SET {', '.join(updates)} WHERE id = ?", params)
+    get_db().commit()
+    return admin_best_sellers()
+
+
+@app.delete("/admin/best-sellers/<int:best_id>")
+@admin_required
+def delete_best_seller(best_id):
+    db = get_db()
+    db.execute("DELETE FROM best_sellers WHERE id = ?", (best_id,))
+    db.commit()
+    return admin_best_sellers()
 
 
 @app.post("/admin/promotions")
