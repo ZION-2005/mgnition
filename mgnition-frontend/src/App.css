@@ -2192,6 +2192,102 @@ h6 {
   margin-top: 14px;
 }
 
+.admin-grid-analytics {
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+}
+
+.admin-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) 2fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.bar-label {
+  font-size: 0.86rem;
+  color: #333;
+}
+
+.bar-track {
+  height: 10px;
+  background: #f0efed;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--red);
+  border-radius: 999px;
+}
+
+.bar-value {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #111;
+}
+
+.admin-line-chart svg {
+  width: 100%;
+  height: 180px;
+}
+
+.admin-line-chart .line {
+  stroke-width: 3;
+}
+
+.admin-line-chart .line.impressions {
+  stroke: #222;
+  opacity: 0.7;
+}
+
+.admin-line-chart .line.saves {
+  stroke: var(--red);
+}
+
+.admin-chart-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 0.85rem;
+  color: #444;
+  margin-top: 8px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-dot.impressions {
+  background: #222;
+}
+
+.legend-dot.saves {
+  background: var(--red);
+}
+
+.admin-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 6px;
+}
+
 .admin-card {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 18px;

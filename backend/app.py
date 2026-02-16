@@ -1892,11 +1892,31 @@ def admin_analytics():
         """
     ).fetchall()
 
-    rows = db.execute("SELECT user_id, variant_key, answers_json, served_at FROM recommendation_impressions").fetchall()
+    rec_rows = db.execute(
+        "SELECT user_id, variant_key, answers_json, served_at FROM recommendation_impressions"
+    ).fetchall()
+    car_rows = db.execute(
+        "SELECT user_id, variant_key, answers_json, served_at FROM car_impressions"
+    ).fetchall()
+
+    impressions_map = {}
+    for r in list(rec_rows) + list(car_rows):
+        key = (r["user_id"], r["variant_key"])
+        served = parse_iso(r["served_at"])
+        if not served:
+            continue
+        existing = impressions_map.get(key)
+        if not existing or served < existing["served_at"]:
+            impressions_map[key] = {
+                "user_id": r["user_id"],
+                "variant_key": r["variant_key"],
+                "answers_json": r["answers_json"] or existing.get("answers_json") if existing else r["answers_json"],
+                "served_at": served,
+            }
 
     seg = {}
-    for r in rows:
-        answers = json.loads(r["answers_json"] or "{}")
+    for item in impressions_map.values():
+        answers = json.loads(item["answers_json"] or "{}")
         fuel_seg = clean_str(answers.get("fuelType")) or "Unknown"
         budget_seg = clean_str(answers.get("budget")) or "Unknown"
         k = f"{fuel_seg} | {budget_seg}"
@@ -1909,17 +1929,16 @@ def admin_analytics():
         created = parse_iso(s["created_at"])
         if not created:
             continue
-        for r in rows:
-            if r["user_id"] == s["user_id"] and r["variant_key"] == s["variant_key"]:
-                served = parse_iso(r["served_at"])
-                if served and created >= served:
-                    answers = json.loads(r["answers_json"] or "{}")
-                    fuel_seg = clean_str(answers.get("fuelType")) or "Unknown"
-                    budget_seg = clean_str(answers.get("budget")) or "Unknown"
-                    k = f"{fuel_seg} | {budget_seg}"
-                    if k in seg:
-                        seg[k]["saves"] += 1
-                    break
+        imp = impressions_map.get((s["user_id"], s["variant_key"]))
+        if not imp:
+            continue
+        if created >= imp["served_at"]:
+            answers = json.loads(imp["answers_json"] or "{}")
+            fuel_seg = clean_str(answers.get("fuelType")) or "Unknown"
+            budget_seg = clean_str(answers.get("budget")) or "Unknown"
+            k = f"{fuel_seg} | {budget_seg}"
+            if k in seg:
+                seg[k]["saves"] += 1
 
     conv = []
     for item in seg.values():
@@ -1930,12 +1949,46 @@ def admin_analytics():
 
     conv.sort(key=lambda x: x["conversion_rate"], reverse=True)
 
+    imp_counts = {}
+    save_counts = {}
+
+    imp_rows = db.execute("SELECT served_at FROM recommendation_impressions").fetchall()
+    imp_rows += db.execute("SELECT served_at FROM car_impressions").fetchall()
+    for r in imp_rows:
+        ts = parse_iso(r["served_at"])
+        if not ts:
+            continue
+        d = ts.date().isoformat()
+        imp_counts[d] = imp_counts.get(d, 0) + 1
+
+    save_rows = db.execute("SELECT created_at FROM user_feedback WHERE event_type = 'save'").fetchall()
+    for r in save_rows:
+        ts = parse_iso(r["created_at"])
+        if not ts:
+            continue
+        d = ts.date().isoformat()
+        save_counts[d] = save_counts.get(d, 0) + 1
+
+    all_dates = sorted(set(imp_counts.keys()) | set(save_counts.keys()))
+    if len(all_dates) > 14:
+        all_dates = all_dates[-14:]
+
+    trend = [
+        {
+            "date": d,
+            "impressions": imp_counts.get(d, 0),
+            "saves": save_counts.get(d, 0),
+        }
+        for d in all_dates
+    ]
+
     return jsonify(
         {
             "top_clicked_variants": [dict(r) for r in top_clicks],
             "top_saved_variants": [dict(r) for r in top_saves],
             "top_booked_variants": [dict(r) for r in top_bookings],
             "conversion_by_quiz_segment": conv[:20],
+            "impressions_saves_trend": trend,
         }
     )
 
@@ -1953,6 +2006,31 @@ def admin_bookings():
         """
     ).fetchall()
     return jsonify({"bookings": [dict(r) for r in rows]})
+
+
+@app.patch("/admin/bookings/<int:booking_id>")
+@admin_required
+def update_booking_status(booking_id):
+    payload = request.get_json(silent=True) or {}
+    status = clean_str(payload.get("status")) or "pending"
+    allowed = {"pending", "accepted", "rejected"}
+    if status not in allowed:
+        return jsonify({"error": "Invalid status."}), 400
+    db = get_db()
+    db.execute("UPDATE bookings SET status = ? WHERE id = ?", (status, booking_id))
+    db.commit()
+    row = db.execute(
+        """
+        SELECT id, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
+               province, model, variant, variant_key, notes, status, created_at
+        FROM bookings
+        WHERE id = ?
+        """,
+        (booking_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Booking not found."}), 404
+    return jsonify({"message": "Booking updated.", "booking": dict(row)})
 
 
 @app.get("/admin/users")

@@ -546,6 +546,12 @@ export default function App() {
       return Boolean(String(v || '').trim());
     });
   }, [answers]);
+
+  useEffect(() => {
+    if (page === 'booking' && (isGuest || isAdmin)) {
+      setPage('showrooms');
+    }
+  }, [page, isGuest, isAdmin]);
   const [savedCars, setSavedCars] = useState([]);
   const resultReasonMap = useMemo(() => {
     const map = new Map();
@@ -1255,6 +1261,21 @@ export default function App() {
       .slice(0, 3);
   };
 
+  const ensureMinResults = (primary, fallback, minCount = 3) => {
+    const seen = new Set();
+    const out = [];
+    const add = (item) => {
+      if (!item) return;
+      const key = savedCarKey(item);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push(item);
+    };
+    (primary || []).forEach(add);
+    (fallback || []).forEach(add);
+    return out.slice(0, minCount);
+  };
+
   const onGetResults = async (targetPage = 'results') => {
     setLoading(true);
     try {
@@ -1296,9 +1317,20 @@ export default function App() {
       if (!res.ok) throw new Error('fallback');
       const data = await res.json();
       const mapped = mapApiResultsToModels(data.recommendations || data.results || [], models, variantByKey);
-      setResults(mapped.length ? mapped : getFilteredLocalResults());
+      const base = mapped.length ? mapped : getFilteredLocalResults();
+      const fallbackPool = [
+        ...getFilteredLocalResults(),
+        ...(bestSellerCars || []),
+        ...(models || [])
+      ];
+      setResults(ensureMinResults(base, fallbackPool, 3));
     } catch {
-      setResults(getFilteredLocalResults());
+      const fallbackPool = [
+        ...getFilteredLocalResults(),
+        ...(bestSellerCars || []),
+        ...(models || [])
+      ];
+      setResults(ensureMinResults(getFilteredLocalResults(), fallbackPool, 3));
     } finally {
       setLoading(false);
       setActiveNav(targetPage === 'home' ? 'Home' : 'Recommended Cars');
@@ -1333,6 +1365,26 @@ export default function App() {
       setAdminMessage('Best seller added.');
     } catch (err) {
       setAdminMessage(err.message);
+    }
+  };
+
+  const handleBookingStatus = async (id, status) => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/admin/bookings/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ status })
+      });
+      const data = await res.json();
+      if (res.ok && data.booking) {
+        setAdminBookings((prev) => prev.map((row) => (row.id === id ? data.booking : row)));
+      }
+    } catch {
+      // ignore update failure
     }
   };
 
@@ -1633,7 +1685,7 @@ export default function App() {
       .catch(() => {});
   };
 
-  const handleSaveModel = async (car) => {
+  const handleSaveModel = async (car, options = {}) => {
     if (!token) {
       setAuthMode('login');
       setPage('auth');
@@ -1651,9 +1703,20 @@ export default function App() {
     const data = await res.json();
     if (res.ok) {
       setSavedCars((data.saved_models || []).map((x) => hydrateSavedCar(x, variantByKey, modelByName)));
-      setActiveNav('Saved Results');
-      setPage('saved');
+      if (!options.silent) {
+        setActiveNav('Saved Results');
+        setPage('saved');
+      }
     }
+  };
+
+  const handleToggleSave = async (car) => {
+    const key = savedCarKey(car);
+    if (savedKeySet.has(key) || savedKeySet.has(String(car.model || '').toLowerCase())) {
+      await handleRemoveSaved(key);
+      return;
+    }
+    await handleSaveModel(car, { silent: true });
   };
 
   const handleViewDetails = async (car) => {
@@ -1732,7 +1795,7 @@ export default function App() {
   }, [selectedShowroom]);
 
   const handleBookConsultation = async () => {
-    if (!token) {
+    if (!token || isAdmin) {
       setAuthMode('login');
       setPage('auth');
       setAuthError('Please sign in to complete booking.');
@@ -1803,6 +1866,34 @@ export default function App() {
     bookings: adminBookings.length,
     promos: publicPromotions.length
   };
+  const conversionSegments = adminAnalytics?.conversion_by_quiz_segment || [];
+  const topSavedVariants = adminAnalytics?.top_saved_variants || [];
+  const impressionsTrend = adminAnalytics?.impressions_saves_trend || [];
+  const maxSavedCount = Math.max(1, ...topSavedVariants.map((r) => Number(r.cnt || 0)));
+  const maxConversionRate = Math.max(1, ...conversionSegments.map((r) => Number(r.conversion_rate || 0)));
+  const trendMax = Math.max(
+    1,
+    ...impressionsTrend.map((d) => Math.max(Number(d.impressions || 0), Number(d.saves || 0)))
+  );
+  const trendLabel = (d) => (d ? String(d).slice(5) : '');
+  const chartWidth = 600;
+  const chartHeight = 180;
+  const chartPad = 18;
+  const chartInnerW = chartWidth - chartPad * 2;
+  const chartInnerH = chartHeight - chartPad * 2;
+  const trendStep = impressionsTrend.length > 1 ? chartInnerW / (impressionsTrend.length - 1) : 0;
+  const trendLine = (field) =>
+    impressionsTrend
+      .map((d, idx) => {
+        const value = Number(d[field] || 0);
+        const x = chartPad + idx * trendStep;
+        const y = chartPad + chartInnerH - (value / trendMax) * chartInnerH;
+        return `${x},${y}`;
+      })
+      .join(' ');
+  const trendStart = impressionsTrend[0]?.date;
+  const trendMid = impressionsTrend[Math.floor(impressionsTrend.length / 2)]?.date;
+  const trendEnd = impressionsTrend[impressionsTrend.length - 1]?.date;
   const adminNavItems = [
     { key: 'overview', label: 'Overview' },
     { key: 'analytics', label: 'Analytics' },
@@ -1896,7 +1987,7 @@ export default function App() {
                       car={car}
                       onView={handleViewDetails}
                       onCompare={isGuest ? null : handleAddToCompare}
-                      onSave={isGuest ? null : handleSaveModel}
+                      onSave={isGuest ? null : handleToggleSave}
                       isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                     />
                   ))}
@@ -1926,7 +2017,7 @@ export default function App() {
                     car={car}
                     onView={handleViewDetails}
                     onCompare={isGuest ? null : handleAddToCompare}
-                    onSave={isGuest ? null : handleSaveModel}
+                    onSave={isGuest ? null : handleToggleSave}
                     isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                   />
                 ))}
@@ -2057,7 +2148,7 @@ export default function App() {
                     car={car}
                     onView={handleViewDetails}
                     onCompare={isGuest ? null : handleAddToCompare}
-                    onSave={isGuest ? null : handleSaveModel}
+                    onSave={isGuest ? null : handleToggleSave}
                     isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                   />
                 ))}
@@ -2657,7 +2748,9 @@ export default function App() {
               <p className="eyebrow">Showroom Locator</p>
               <h2>Find a nearby MG showroom</h2>
               <p className="showroom-subtitle">
-                Enter your province and optional postal code to match the nearest MG showroom and book a consultation.
+                {!isGuest && !isAdmin
+                  ? 'Enter your province and optional postal code to match the nearest MG showroom and book a consultation.'
+                  : 'Enter your province and optional postal code to match the nearest MG showroom.'}
               </p>
             </div>
             <div className="showroom-hero-card">
@@ -2724,18 +2817,12 @@ export default function App() {
                     </div>
                     <div className="showroom-score">
                       <span className="showroom-distance">{s.smartDistanceKm || '-'} km</span>
-                      <span className="showroom-match">Match {s.matchScore || 0}</span>
                     </div>
                   </div>
                   <div className="showroom-card-meta">
                     <div>
                       <span className="meta-label">Phone</span>
                       <strong>{s.phone || '-'}</strong>
-                    </div>
-                    <div className="meta-tags">
-                      {(s.reasons || []).slice(0, 2).map((reason) => (
-                        <span key={reason} className="tag-pill">{reason}</span>
-                      ))}
                     </div>
                   </div>
                   <div className="showroom-actions">
@@ -2749,16 +2836,18 @@ export default function App() {
                     >
                       View details
                     </button>
-                    <button
-                      className="btn black"
-                      onClick={() => {
-                        setSelectedShowroom(s);
-                        setPage('booking');
-                      }}
-                      type="button"
-                    >
-                      Book consultation
-                    </button>
+                    {!isGuest && !isAdmin && (
+                      <button
+                        className="btn black"
+                        onClick={() => {
+                          setSelectedShowroom(s);
+                          setPage('booking');
+                        }}
+                        type="button"
+                      >
+                        Book consultation
+                      </button>
+                    )}
                   </div>
                 </article>
               ))}
@@ -2779,11 +2868,10 @@ export default function App() {
                     <h4>{s.name}</h4>
                     <span>{s.smartDistanceKm || '-'} KM</span>
                   </div>
-                  <p><b>Smart Match:</b> {s.matchScore || 0}</p>
+                  <p><b>Distance:</b> {s.smartDistanceKm || '-'} km</p>
                   <p>{s.address}</p>
                   <p>Postal Code: {postalFromAddress(s.address) || '-'}</p>
                   <p>Phone: {s.phone || '-'}</p>
-                  <p className="muted-text">{(s.reasons || []).join(' • ')}</p>
                   <div className="showroom-actions">
                     <a
                       className="btn light"
@@ -2793,16 +2881,18 @@ export default function App() {
                     >
                       View Map
                     </a>
-                    <button
-                      className="btn black"
-                      onClick={() => {
-                        setSelectedShowroom(s);
-                        setPage('booking');
-                      }}
-                      type="button"
-                    >
-                      Book Consultation
-                    </button>
+                    {!isGuest && !isAdmin && (
+                      <button
+                        className="btn black"
+                        onClick={() => {
+                          setSelectedShowroom(s);
+                          setPage('booking');
+                        }}
+                        type="button"
+                      >
+                        Book Consultation
+                      </button>
+                    )}
                   </div>
                 </article>
               ))}
@@ -2812,7 +2902,7 @@ export default function App() {
         </section>
       )}
 
-      {page === 'booking' && (
+      {page === 'booking' && !isGuest && !isAdmin && (
         <section className="page-section booking-page">
           {(() => {
             const showroomName = selectedShowroom?.name || smartShowrooms[0]?.name || filteredShowrooms[0]?.name || '';
@@ -3130,78 +3220,81 @@ export default function App() {
 
             {adminSection === 'analytics' && (
               <>
-                <div className="admin-grid">
+                <div className="admin-grid admin-grid-analytics">
                   <article className="admin-card">
-                    <h3>Top Clicked Variants</h3>
-                    <ul className="admin-list">
-                      {(adminAnalytics?.top_clicked_variants || []).map((r) => (
-                        <li key={`click-${r.variant_key}`}>
-                          <span>{variantLabelFromKey(r.variant_key)}</span>
-                          <strong>{r.cnt}</strong>
-                        </li>
+                    <div className="admin-card-head">
+                      <h3>Top Saved Variants</h3>
+                    </div>
+                    <div className="admin-chart">
+                      {topSavedVariants.map((r) => (
+                        <div className="admin-bar-row" key={`save-${r.variant_key}`}>
+                          <span className="bar-label">{variantLabelFromKey(r.variant_key)}</span>
+                          <div className="bar-track">
+                            <span
+                              className="bar-fill"
+                              style={{ width: `${(Number(r.cnt || 0) / maxSavedCount) * 100}%` }}
+                            />
+                          </div>
+                          <span className="bar-value">{r.cnt}</span>
+                        </div>
                       ))}
-                      {!adminAnalytics?.top_clicked_variants?.length && <li>No click data yet.</li>}
-                    </ul>
+                      {!topSavedVariants.length && <p className="muted-text">No save data yet.</p>}
+                    </div>
                   </article>
 
                   <article className="admin-card">
-                    <h3>Top Saved Variants</h3>
-                    <ul className="admin-list">
-                      {(adminAnalytics?.top_saved_variants || []).map((r) => (
-                        <li key={`save-${r.variant_key}`}>
-                          <span>{variantLabelFromKey(r.variant_key)}</span>
-                          <strong>{r.cnt}</strong>
-                        </li>
+                    <div className="admin-card-head">
+                      <h3>Conversion by Quiz Segment</h3>
+                    </div>
+                    <div className="admin-chart">
+                      {conversionSegments.map((row) => (
+                        <div className="admin-bar-row" key={row.segment}>
+                          <span className="bar-label">{row.segment}</span>
+                          <div className="bar-track">
+                            <span
+                              className="bar-fill"
+                              style={{ width: `${(Number(row.conversion_rate || 0) / maxConversionRate) * 100}%` }}
+                            />
+                          </div>
+                          <span className="bar-value">{row.conversion_rate}%</span>
+                        </div>
                       ))}
-                      {!adminAnalytics?.top_saved_variants?.length && <li>No save data yet.</li>}
-                    </ul>
-                  </article>
-
-                  <article className="admin-card">
-                    <h3>Top Booked Variants</h3>
-                    <ul className="admin-list">
-                      {(adminAnalytics?.top_booked_variants || []).map((r) => (
-                        <li key={`booking-rank-${r.variant_key}`}>
-                          <span>{variantLabelFromKey(r.variant_key)}</span>
-                          <strong>{r.cnt}</strong>
-                        </li>
-                      ))}
-                      {!adminAnalytics?.top_booked_variants?.length && <li>No booking data yet.</li>}
-                    </ul>
+                      {!conversionSegments.length && <p className="muted-text">No conversion data yet.</p>}
+                    </div>
                   </article>
                 </div>
 
                 <article className="admin-card">
                   <div className="admin-card-head">
-                    <h3>Conversion by Quiz Segment</h3>
+                    <h3>Impressions vs Saves Trend</h3>
                   </div>
-                  <div className="admin-table-wrap">
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th>Segment (Fuel | Budget)</th>
-                          <th>Impressions</th>
-                          <th>Saves</th>
-                          <th>Conversion Rate</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(adminAnalytics?.conversion_by_quiz_segment || []).map((row) => (
-                          <tr key={row.segment}>
-                            <td>{row.segment}</td>
-                            <td>{row.impressions}</td>
-                            <td>{row.saves}</td>
-                            <td>{row.conversion_rate}%</td>
-                          </tr>
-                        ))}
-                        {!adminAnalytics?.conversion_by_quiz_segment?.length && (
-                          <tr>
-                            <td colSpan={4}>No conversion data yet.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  {impressionsTrend.length ? (
+                    <div className="admin-line-chart">
+                      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Impressions and saves trend">
+                        <polyline
+                          className="line impressions"
+                          fill="none"
+                          points={trendLine('impressions')}
+                        />
+                        <polyline
+                          className="line saves"
+                          fill="none"
+                          points={trendLine('saves')}
+                        />
+                      </svg>
+                      <div className="admin-chart-legend">
+                        <span className="legend-item"><i className="legend-dot impressions" />Impressions</span>
+                        <span className="legend-item"><i className="legend-dot saves" />Saves</span>
+                      </div>
+                      <div className="admin-chart-axis">
+                        <span>{trendLabel(trendStart)}</span>
+                        <span>{trendLabel(trendMid)}</span>
+                        <span>{trendLabel(trendEnd)}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="muted-text">No trend data yet.</p>
+                  )}
                 </article>
               </>
             )}
@@ -3233,7 +3326,17 @@ export default function App() {
                           <td>{row.showroom_name || '-'} ({row.province || '-'})</td>
                           <td>{row.model || '-'}</td>
                           <td>{row.variant || 'Any variant'}</td>
-                          <td>{row.status || 'pending'}</td>
+                          <td>
+                            <select
+                              className="admin-status"
+                              value={row.status || 'pending'}
+                              onChange={(e) => handleBookingStatus(row.id, e.target.value)}
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="accepted">Accept</option>
+                              <option value="rejected">Reject</option>
+                            </select>
+                          </td>
                         </tr>
                       ))}
                       {!adminBookings.length && (
