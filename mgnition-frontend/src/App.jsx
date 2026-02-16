@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import modelsData from './data/models.json';
 import showroomsData from './data/showrooms.json';
@@ -500,6 +500,7 @@ export default function App() {
   const [activeNav, setActiveNav] = useState('');
   const [pageHistory, setPageHistory] = useState(['landing']);
   const backNavRef = useRef(false);
+  const impressionLogRef = useRef({});
   const [answers, setAnswers] = useState({});
   const [selectedCar, setSelectedCar] = useState(null);
   const [results, setResults] = useState([]);
@@ -562,6 +563,7 @@ export default function App() {
     });
     return set;
   }, [savedCars]);
+
   const [authMode, setAuthMode] = useState('login');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -625,6 +627,52 @@ export default function App() {
     });
     return map;
   }, [variantRows]);
+
+  const modelVariantKeyMap = useMemo(() => {
+    const map = new Map();
+    variantRows.forEach((row) => {
+      if (!row.Model) return;
+      const key = `${row.Model || ''}|${row.Variant || ''}|${row.Year || ''}`;
+      if (!map.has(row.Model)) {
+        map.set(row.Model, key);
+      }
+    });
+    return map;
+  }, [variantRows]);
+
+  const impressionKeyForCar = useCallback(
+    (car) => {
+      if (!car) return '';
+      return car.variant_key || modelVariantKeyMap.get(car.model) || '';
+    },
+    [modelVariantKeyMap]
+  );
+
+  const logImpressions = useCallback(
+    async (variantKeys, source) => {
+      const cleaned = (variantKeys || []).map((v) => String(v || '').trim()).filter(Boolean);
+      if (!cleaned.length) return;
+      const bucket = impressionLogRef.current[source] || new Set();
+      const fresh = cleaned.filter((k) => !bucket.has(k));
+      if (!fresh.length) return;
+      fresh.forEach((k) => bucket.add(k));
+      impressionLogRef.current[source] = bucket;
+
+      try {
+        await fetch(`${API_BASE}/impressions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({ variant_keys: fresh, source })
+        });
+      } catch {
+        // ignore logging failures
+      }
+    },
+    [token]
+  );
 
   const modelDefaults = useMemo(() => {
     const byModel = {};
@@ -697,6 +745,12 @@ export default function App() {
       .filter(Boolean);
     return list.length ? list : models.slice(0, 3);
   }, [publicBestSellers, models, variantByKey, modelByName]);
+
+  useEffect(() => {
+    if (page !== 'home') return;
+    const keys = bestSellerCars.map(impressionKeyForCar).filter(Boolean);
+    logImpressions(keys, 'best_sellers');
+  }, [page, bestSellerCars, impressionKeyForCar, logImpressions]);
 
   const promoCars = useMemo(() => {
     const a = models.find((m) => m.model.toLowerCase().includes('vs hev')) || models.find((m) => m.model.toLowerCase().includes('mg5'));
@@ -819,6 +873,14 @@ export default function App() {
     () => (selectedVariant ? `${selectedVariant.Model}|${selectedVariant.Variant || ''}|${selectedVariant.Year || ''}` : ''),
     [selectedVariant]
   );
+
+  useEffect(() => {
+    if (page !== 'details') return;
+    const key = selectedVariantKey || impressionKeyForCar(selectedCar);
+    if (key) {
+      logImpressions([key], 'details');
+    }
+  }, [page, selectedVariantKey, selectedCar, impressionKeyForCar, logImpressions]);
 
   const selectedVariantColorMap = useMemo(() => extractColorImageMap(selectedVariant), [selectedVariant]);
   const selectedVariantColors = useMemo(() => {
@@ -1002,6 +1064,12 @@ export default function App() {
       return true;
     });
   }, [models, modelFilters, modelPriceValue]);
+
+  useEffect(() => {
+    if (page !== 'models') return;
+    const keys = filteredModels.map(impressionKeyForCar).filter(Boolean);
+    logImpressions(keys, 'models');
+  }, [page, filteredModels, impressionKeyForCar, logImpressions]);
 
   const availableFilterColors = useMemo(() => {
     const set = new Set();

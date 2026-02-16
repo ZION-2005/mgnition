@@ -299,6 +299,16 @@ def init_db():
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS car_impressions (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT,
+                variant_key TEXT NOT NULL,
+                served_at TEXT NOT NULL,
+                source TEXT,
+                answers_json TEXT NOT NULL
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS user_feedback (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(id),
@@ -442,6 +452,15 @@ def init_db():
                 rule_score REAL,
                 ml_score REAL,
                 final_score REAL,
+                answers_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS car_impressions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                variant_key TEXT NOT NULL,
+                served_at TEXT NOT NULL,
+                source TEXT,
                 answers_json TEXT NOT NULL
             );
 
@@ -1111,31 +1130,66 @@ def train_from_feedback(min_samples=25):
         return {"trained": False, "reason": "scikit-learn not installed"}
 
     db = create_db_connection()
-    rows = db.execute(
+    rec_rows = db.execute(
         """
-        SELECT i.user_id, i.variant_key, i.answers_json, i.rule_score, i.served_at,
-               EXISTS(
-                 SELECT 1 FROM user_feedback f
-                 WHERE f.user_id = i.user_id
-                   AND f.variant_key = i.variant_key
-                   AND f.event_type = 'save'
-                   AND f.created_at >= i.served_at
-               ) AS has_save,
-               EXISTS(
-                 SELECT 1 FROM user_feedback f
-                 WHERE f.user_id = i.user_id
-                   AND f.variant_key = i.variant_key
-                   AND f.event_type = 'booking'
-                   AND f.created_at >= i.served_at
-               ) AS has_booking
-        FROM recommendation_impressions i
-        WHERE i.user_id IS NOT NULL
+        SELECT user_id, variant_key, answers_json, rule_score, served_at
+        FROM recommendation_impressions
+        WHERE user_id IS NOT NULL
+        """
+    ).fetchall()
+    car_rows = db.execute(
+        """
+        SELECT user_id, variant_key, answers_json, served_at
+        FROM car_impressions
+        WHERE user_id IS NOT NULL
         """
     ).fetchall()
 
-    if len(rows) < min_samples:
+    if len(rec_rows) + len(car_rows) < min_samples:
         db.close()
-        return {"trained": False, "reason": f"need at least {min_samples} samples", "samples": len(rows)}
+        return {
+            "trained": False,
+            "reason": f"need at least {min_samples} samples",
+            "samples": len(rec_rows) + len(car_rows),
+        }
+
+    feedback_rows = db.execute(
+        """
+        SELECT user_id, variant_key, event_type, created_at
+        FROM user_feedback
+        WHERE event_type IN ('save', 'booking')
+        """
+    ).fetchall()
+
+    feedback_map = {}
+    for f in feedback_rows:
+        key = (f["user_id"], f["variant_key"])
+        bucket = feedback_map.setdefault(key, {"save": [], "booking": []})
+        ts = parse_iso(f["created_at"])
+        if ts and f["event_type"] in bucket:
+            bucket[f["event_type"]].append(ts)
+
+    rows = []
+    for r in rec_rows:
+        rows.append(
+            {
+                "user_id": r["user_id"],
+                "variant_key": r["variant_key"],
+                "answers_json": r["answers_json"],
+                "rule_score": r["rule_score"] or 0,
+                "served_at": r["served_at"],
+            }
+        )
+    for r in car_rows:
+        rows.append(
+            {
+                "user_id": r["user_id"],
+                "variant_key": r["variant_key"],
+                "answers_json": r["answers_json"],
+                "rule_score": 0,
+                "served_at": r["served_at"],
+            }
+        )
 
     variants = {v["variant_key"]: v for v in BASE_VARIANTS}
     admin = db.execute(
@@ -1166,8 +1220,10 @@ def train_from_feedback(min_samples=25):
             continue
         answers = json.loads(r["answers_json"] or "{}")
         xs.append(featurize(v, answers, r["rule_score"] or 0))
-        has_save = int(r["has_save"] or 0) == 1
-        has_booking = int(r["has_booking"] or 0) == 1
+        served = parse_iso(r["served_at"])
+        fb = feedback_map.get((r["user_id"], r["variant_key"]), {"save": [], "booking": []})
+        has_save = any(ts and served and ts >= served for ts in fb.get("save", []))
+        has_booking = any(ts and served and ts >= served for ts in fb.get("booking", []))
         label = 1 if (has_save or has_booking) else 0
         ys.append(label)
         ws.append(2.6 if has_booking else (1.4 if has_save else 1.0))
@@ -1242,6 +1298,26 @@ def log_impressions(user_id, answers, recommended):
             (user_id, r["variant_key"], now, i, r["rule_score"], r["ml_score"], r["score"], json.dumps(answers)),
         )
     db.commit()
+
+
+def log_car_impressions(user_id, answers, variant_keys, source=None):
+    db = get_db()
+    now = utc_now_iso()
+    cleaned = [clean_str(k) for k in (variant_keys or []) if clean_str(k)]
+    if not cleaned:
+        return 0
+    payload = json.dumps(answers or {})
+    src = clean_str(source) or None
+    for key in cleaned:
+        db.execute(
+            """
+            INSERT INTO car_impressions (user_id, variant_key, served_at, source, answers_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, key, now, src, payload),
+        )
+    db.commit()
+    return len(cleaned)
 
 
 def insert_feedback(user_id, variant_key, event_type, payload=None):
@@ -1531,6 +1607,28 @@ def feedback_click():
         return jsonify({"error": "variant_key or model is required."}), 400
     insert_feedback(g.current_user["id"], vk, "click", payload)
     return jsonify({"message": "Click feedback logged."})
+
+
+@app.post("/impressions")
+def capture_impressions():
+    payload = request.get_json(silent=True) or {}
+    variant_keys = payload.get("variant_keys") or payload.get("variant_key") or []
+    if isinstance(variant_keys, str):
+        variant_keys = [variant_keys]
+    if not isinstance(variant_keys, list):
+        return jsonify({"error": "variant_keys must be a list"}), 400
+
+    source = payload.get("source")
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else None
+
+    token = get_token_from_header()
+    user = get_user_by_token(token) if token else None
+    user_id = user["id"] if user else None
+    if answers is None and user_id:
+        answers = get_profile(user_id).get("quiz_answers") or {}
+
+    logged = log_car_impressions(user_id, answers or {}, variant_keys, source=source)
+    return jsonify({"message": "Impressions logged.", "logged": logged})
 
 
 @app.post("/bookings")
