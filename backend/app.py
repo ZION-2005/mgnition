@@ -51,8 +51,34 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("MGNITION_DB_PATH", str(BASE_DIR / "mgnition.db")))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")
-VARIANT_DATA_PATH = BASE_DIR / "data" / "modelVariants.json"
 MODEL_PATH = BASE_DIR / "models" / "recommender.joblib"
+SURVEY_REG_MODEL_PATH = BASE_DIR / "models" / "survey_regression.joblib"
+SURVEY_REG_BLEND_WEIGHT = float(os.getenv("SURVEY_REG_BLEND_WEIGHT", "0.15"))
+
+
+def resolve_variant_data_path():
+    env_path = os.getenv("MGNITION_VARIANT_DATA_PATH", "").strip()
+    candidates = []
+    if env_path:
+        p = Path(env_path).expanduser()
+        if not p.is_absolute():
+            p = (BASE_DIR / p).resolve()
+        candidates.append(p)
+
+    candidates.extend(
+        [
+            BASE_DIR / "data" / "modelVariants.json",
+            BASE_DIR.parent / "mgnition-frontend" / "src" / "data" / "modelVariants.json",
+        ]
+    )
+
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+VARIANT_DATA_PATH = resolve_variant_data_path()
 
 
 def utc_now():
@@ -832,6 +858,83 @@ def map_answers_to_cosine_input(answers):
     return out
 
 
+def canonical_survey_choice_label(text):
+    s = normalize_text(text)
+    if not s:
+        return None
+    if "mg 3 hybrid" in s:
+        return "mg3_hybrid"
+    if "s5 ev" in s:
+        return "mgs5_ev_plus"
+    if "vs hev" in s:
+        return "mg_vs_hev"
+    if "mg es" in s:
+        return "mg_es"
+    if "mg hs" in s and "phev" not in s:
+        return "mg_hs"
+    return None
+
+
+def canonical_survey_choice_for_car(car_row):
+    model = normalize_text(car_row.get("model"))
+    variant = normalize_text(car_row.get("variant"))
+    fuel_type = normalize_text(car_row.get("fuel_type"))
+    joined = f"{model} {variant} {fuel_type}".strip()
+    return canonical_survey_choice_label(joined)
+
+
+def survey_regression_features_from_answers(answers):
+    feat = {}
+
+    def _push(prefix, value):
+        v = normalize_text(value)
+        if v:
+            feat[f"{prefix}::{v}"] = 1
+
+    _push("occupation", answers.get("occupation"))
+    _push("budget", answers.get("budget_choice") or answers.get("budget"))
+    _push("seats", answers.get("seat_choice") or answers.get("seats"))
+    _push("fuel", answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+    _push("distance", answers.get("daily_distance") or answers.get("distance"))
+
+    usage_val = answers.get("usage")
+    usage_items = _as_list(usage_val)
+    for item in usage_items:
+        _push("usage", item)
+
+    hobbies_items = _as_list(answers.get("hobbies"))
+    for item in hobbies_items:
+        _push("hobby", item)
+
+    return feat
+
+
+def load_survey_regression_artifact():
+    if not SKLEARN_AVAILABLE or not SURVEY_REG_MODEL_PATH.exists():
+        return None
+    try:
+        artifact = joblib.load(SURVEY_REG_MODEL_PATH)
+        if not artifact or not artifact.get("vectorizer") or not artifact.get("model"):
+            return None
+        return artifact
+    except Exception:
+        return None
+
+
+def survey_regression_probs(answers):
+    artifact = SURVEY_REG_ARTIFACT
+    if not artifact:
+        return {}
+    try:
+        feat = survey_regression_features_from_answers(answers)
+        X = artifact["vectorizer"].transform([feat])
+        probs = artifact["model"].predict_proba(X)[0]
+        classes = list(artifact["model"].classes_)
+        return {str(classes[i]): float(probs[i]) for i in range(len(classes))}
+    except Exception:
+        return {}
+
+
 COSINE_REASON_LABELS = {
     "price_weight": "Budget alignment",
     "hp_weight": "Power preference alignment",
@@ -848,6 +951,43 @@ COSINE_REASON_LABELS = {
 }
 
 
+def _cosine_reason_detail(key, car_row, answers):
+    price = fmt_price(car_row.get("price_thb"))
+    seats = int(safe_float(car_row.get("seats"), 0) or 0)
+    range_km = int(safe_float(car_row.get("range_km"), 0) or 0)
+    cargo = int(safe_float(car_row.get("cargo_liters"), 0) or 0)
+    hp = int(safe_float(car_row.get("horsepower_hp"), 0) or 0)
+    torque = int(safe_float(car_row.get("torque_nm"), 0) or 0)
+    fuel_type = clean_str(car_row.get("fuel_type")) or "N/A"
+    body_type = clean_str(car_row.get("body_type")) or "N/A"
+
+    if key == "price_weight":
+        return f"This price is in your budget ({price})."
+    if key == "seats_weight":
+        return f"This car has the seats you asked for ({seats} seats)."
+    if key == "range_weight":
+        return f"The driving range matches your daily distance ({range_km} km)."
+    if key == "cargo_weight":
+        return f"The cargo space suits your usage ({cargo} L)."
+    if key == "hp_weight":
+        return f"The power level matches your driving preference ({hp} hp)."
+    if key == "torque_weight":
+        return f"Torque is suitable for your driving needs ({torque} Nm)."
+    if key == "fuel_ev_weight":
+        return f"You selected EV, and this car is {fuel_type}."
+    if key == "fuel_hev_weight":
+        return f"You selected hybrid, and this car is {fuel_type}."
+    if key == "fuel_ice_weight":
+        return f"You selected petrol/diesel, and this car is {fuel_type}."
+    if key == "efficiency_weight":
+        return "This car is fuel-efficient for your driving pattern."
+    if key == "suv_pref":
+        return f"You prefer SUV-style driving, and this car is a {body_type}."
+    if key == "sedan_pref":
+        return f"You prefer sedan/hatchback style, and this car is a {body_type}."
+    return "This feature strongly matches your quiz answers."
+
+
 def build_cosine_explanation(car_row, user_profile, final_score, answers=None):
     contributions = []
     for key in COSINE_FEATURE_ORDER:
@@ -856,22 +996,11 @@ def build_cosine_explanation(car_row, user_profile, final_score, answers=None):
         contributions.append((key, u * c))
     contributions.sort(key=lambda x: x[1], reverse=True)
 
-    top = [(k, v) for k, v in contributions if v > 0][:3]
+    ranked = [(k, v) for k, v in contributions if v > 0]
     factors = []
-    for key, val in top:
+    for key, val in ranked:
         label = COSINE_REASON_LABELS.get(key, key)
-        if key == "price_weight":
-            detail = f"Price {fmt_price(car_row.get('price_thb'))} aligns with your budget preference."
-        elif key == "seats_weight":
-            detail = f"Seat capacity ({int(safe_float(car_row.get('seats'), 0) or 0)} seats) aligns with your need."
-        elif key == "fuel_ev_weight":
-            detail = f"Fuel type ({clean_str(car_row.get('fuel_type')) or 'N/A'}) aligns with EV preference."
-        elif key == "range_weight":
-            detail = f"Range ({int(safe_float(car_row.get('range_km'), 0) or 0)} km) aligns with your daily distance."
-        elif key == "cargo_weight":
-            detail = f"Cargo capacity ({int(safe_float(car_row.get('cargo_liters'), 0) or 0)} L) aligns with lifestyle needs."
-        else:
-            detail = f"{label} contributed strongly to the cosine similarity score."
+        detail = _cosine_reason_detail(key, car_row, answers or {})
         factors.append(
             {
                 "key": key,
@@ -881,12 +1010,15 @@ def build_cosine_explanation(car_row, user_profile, final_score, answers=None):
             }
         )
 
-    top_reasons = build_template_reasons(answers or {}, car_row)
+    ordered_reason_lines = [f["detail"] for f in factors]
+    top_reasons = ordered_reason_lines[:3]
+    more_reasons = ordered_reason_lines[3:8]
     if not top_reasons:
         top_reasons = ["Matched overall preferences from your quiz."]
 
     return {
         "top_reasons": top_reasons,
+        "more_reasons": more_reasons,
         "factors": factors,
         "rule_score": None,
         "ml_score": None,
@@ -1106,7 +1238,6 @@ def featurize(variant, answers, base_rule):
         "answer_fuel": normalize_text(answers.get("fuelType")),
         "answer_usage": normalize_text(answers.get("usage")),
         "answer_distance": normalize_text(answers.get("distance")),
-        "answer_style": normalize_text(answers.get("style")),
         "answer_occupation": normalize_text(answers.get("occupation")),
     }
 
@@ -1121,6 +1252,7 @@ def load_model_artifact():
 
 
 MODEL_ARTIFACT = load_model_artifact()
+SURVEY_REG_ARTIFACT = load_survey_regression_artifact()
 
 
 def train_from_feedback(min_samples=25):
@@ -1691,6 +1823,20 @@ def recommend():
     if not isinstance(answers, dict):
         answers = {}
 
+    # Enforce cosine-only recommendations so hard constraints are always applied.
+    if not COSINE_AVAILABLE:
+        return (
+            jsonify(
+                {
+                    "recommendations": [],
+                    "engine": "cosine_similarity",
+                    "message": "Cosine engine is unavailable. Install backend requirements and restart with scripts/run_backend.sh.",
+                    "cosine_error": COSINE_IMPORT_ERROR or "unknown import error",
+                }
+            ),
+            503,
+        )
+
     token = get_token_from_header()
     user = get_user_by_token(token)
     user_id = user["id"] if user else None
@@ -1698,55 +1844,81 @@ def recommend():
         upsert_profile(user_id, answers)
 
     top = []
-    if COSINE_AVAILABLE:
-        car_df = pd.DataFrame(get_all_variants())
-        cosine_input = map_answers_to_cosine_input(answers)
-        ranked_df, user_profile, _feature_cols, msg = score_cars_with_cosine(car_df, cosine_input, debug=False)
+    car_df = pd.DataFrame(get_all_variants())
+    cosine_input = map_answers_to_cosine_input(answers)
+    ranked_df, user_profile, _feature_cols, msg = score_cars_with_cosine(car_df, cosine_input, debug=False)
 
-        if msg:
-            return jsonify({"recommendations": [], "message": msg, "engine": "cosine_similarity"})
+    if msg:
+        return jsonify({"recommendations": [], "message": msg, "engine": "cosine_similarity"})
 
-        ranked_df = ranked_df.sort_values("similarity_score", ascending=False).head(6)
-
-        def _safe_text(v):
-            if v is None:
-                return ""
-            if isinstance(v, float) and v != v:
-                return ""
-            s = str(v).strip()
-            return "" if s.lower() == "nan" else s
-
+    reg_probs = survey_regression_probs(answers)
+    blend_w = max(0.0, min(0.5, SURVEY_REG_BLEND_WEIGHT))
+    if reg_probs:
+        reg_scores = []
+        final_scores = []
         for _, row in ranked_df.iterrows():
             r = row.to_dict()
-            score = round(float(safe_float(r.get("similarity_score"), 0)), 6)
-            explanation = build_cosine_explanation(r, user_profile, score, answers)
-            top.append(
-                {
-                    "variant_key": clean_str(r.get("variant_key")),
-                    "model": clean_str(r.get("model")),
-                    "variant": clean_str(r.get("variant")),
-                    "year": clean_str(r.get("year")),
-                    "starting_price": _safe_text(r.get("starting_price")) or fmt_price(r.get("price_thb")),
-                    "price_thb": safe_float(r.get("price_thb"), 0),
-                    "fuel_type": clean_str(r.get("fuel_type")),
-                    "seats": int(safe_float(r.get("seats"), 0) or 0),
-                    "body_type": clean_str(r.get("body_type")),
-                    "range_km": safe_float(r.get("range_km"), 0),
-                    "horsepower_hp": safe_float(r.get("horsepower_hp"), 0),
-                    "torque_nm": safe_float(r.get("torque_nm"), 0),
-                    "image_url": _safe_text(r.get("image_url")),
-                    "color_images": r.get("color_images") if isinstance(r.get("color_images"), dict) else {},
-                    "default_color": _safe_text(r.get("default_color")),
-                    "rule_score": None,
-                    "ml_score": None,
-                    "score": score,
-                    "reason": "Cosine similarity from quiz profile + hard constraints",
-                    "explanation": explanation,
-                    "rule_breakdown": {f["key"]: f["points"] for f in explanation.get("factors", [])},
-                }
-            )
+            cls = canonical_survey_choice_for_car(r)
+            cosine_score = float(safe_float(r.get("similarity_score"), 0))
+            reg_score = float(reg_probs.get(cls, 0.0)) if cls else 0.0
+            if cls:
+                final_score = (1.0 - blend_w) * cosine_score + blend_w * reg_score
+            else:
+                # Keep unseen/non-survey cars neutral rather than penalizing them.
+                final_score = cosine_score
+            reg_scores.append(reg_score)
+            final_scores.append(final_score)
+        ranked_df = ranked_df.copy()
+        ranked_df["regression_score"] = reg_scores
+        ranked_df["final_score"] = final_scores
+        ranked_df = ranked_df.sort_values("final_score", ascending=False).head(6)
     else:
-        top = recommend_variants(answers, top_k=6)
+        ranked_df = ranked_df.copy()
+        ranked_df["regression_score"] = 0.0
+        ranked_df["final_score"] = ranked_df["similarity_score"]
+        ranked_df = ranked_df.sort_values("final_score", ascending=False).head(6)
+
+    def _safe_text(v):
+        if v is None:
+            return ""
+        if isinstance(v, float) and v != v:
+            return ""
+        s = str(v).strip()
+        return "" if s.lower() == "nan" else s
+
+    for _, row in ranked_df.iterrows():
+        r = row.to_dict()
+        cosine_score = round(float(safe_float(r.get("similarity_score"), 0)), 6)
+        reg_score = round(float(safe_float(r.get("regression_score"), 0)), 6)
+        score = round(float(safe_float(r.get("final_score"), cosine_score)), 6)
+        explanation = build_cosine_explanation(r, user_profile, score, answers)
+        top.append(
+            {
+                "variant_key": clean_str(r.get("variant_key")),
+                "model": clean_str(r.get("model")),
+                "variant": clean_str(r.get("variant")),
+                "year": clean_str(r.get("year")),
+                "starting_price": _safe_text(r.get("starting_price")) or fmt_price(r.get("price_thb")),
+                "price_thb": safe_float(r.get("price_thb"), 0),
+                "fuel_type": clean_str(r.get("fuel_type")),
+                "seats": int(safe_float(r.get("seats"), 0) or 0),
+                "body_type": clean_str(r.get("body_type")),
+                "range_km": safe_float(r.get("range_km"), 0),
+                "horsepower_hp": safe_float(r.get("horsepower_hp"), 0),
+                "torque_nm": safe_float(r.get("torque_nm"), 0),
+                "image_url": _safe_text(r.get("image_url")),
+                "color_images": r.get("color_images") if isinstance(r.get("color_images"), dict) else {},
+                "default_color": _safe_text(r.get("default_color")),
+                "rule_score": None,
+                "ml_score": None,
+                "score": score,
+                "cosine_score": cosine_score,
+                "regression_score": reg_score,
+                "reason": "Cosine similarity + survey regression + hard constraints",
+                "explanation": explanation,
+                "rule_breakdown": {f["key"]: f["points"] for f in explanation.get("factors", [])},
+            }
+        )
 
     log_impressions(user_id, answers, top)
 
@@ -1770,19 +1942,19 @@ def recommend():
                 "color_images": r.get("color_images", {}),
                 "default_color": r.get("default_color", ""),
                 "score": r["score"],
-                "reason": r.get("reason") or "Hybrid ranking from quiz + behavior learning",
+                "cosine_score": r.get("cosine_score", r["score"]),
+                "regression_score": r.get("regression_score", 0),
+                "reason": r.get("reason") or "Cosine similarity + survey regression + hard constraints",
                 "explanation": r.get("explanation", {}),
                 "rule_breakdown": r.get("rule_breakdown", {}),
             }
         )
 
-    payload = {"recommendations": out}
-    if COSINE_AVAILABLE:
-        payload["engine"] = "cosine_similarity"
-    else:
-        payload["engine"] = "hybrid_rule_ml_fallback"
-        if COSINE_IMPORT_ERROR:
-            payload["cosine_error"] = COSINE_IMPORT_ERROR
+    payload = {
+        "recommendations": out,
+        "engine": "cosine_similarity",
+        "regression_enabled": bool(reg_probs),
+    }
     return jsonify(payload)
 
 

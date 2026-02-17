@@ -848,6 +848,16 @@ h6 {
   gap: 6px;
 }
 
+.detail-explainer-more {
+  margin-top: 8px !important;
+}
+
+.detail-explainer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .detail-promotions {
   width: min(980px, 100%);
   margin: 0 auto 16px;

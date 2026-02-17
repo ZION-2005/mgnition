@@ -13,6 +13,8 @@ mgnition-frontend/dist/
 
 # Local data
 backend/mgnition.db
+Final MG Car Preference Survey (Responses) - Form Responses 1.csv
+backend/data/surveys/raw/
 
 # Swap files
 *.swp

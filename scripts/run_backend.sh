@@ -12,6 +12,16 @@ fi
 
 source ".venv/bin/activate"
 
+if ! python - <<'PY' >/dev/null 2>&1
+import pandas  # noqa: F401
+import numpy  # noqa: F401
+import sklearn  # noqa: F401
+PY
+then
+  echo "Installing backend dependencies from requirements.txt..."
+  pip install -r requirements.txt
+fi
+
 if [ -f ".env" ]; then
   set -a
   # shellcheck disable=SC1091

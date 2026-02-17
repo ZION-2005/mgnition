@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+import json
+import os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
@@ -165,6 +169,14 @@ FEATURE_ORDER: List[str] = [
 ]
 
 
+BASE_DIR = Path(__file__).resolve().parent
+LEARNED_PROFILE_PATH = Path(
+    os.getenv("LEARNED_PROFILE_PATH", str(BASE_DIR / "data" / "learned_profiles.json"))
+)
+DEFAULT_HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.7"))
+DEFAULT_MIN_SAMPLES = int(os.getenv("PROFILE_MIN_SAMPLES", "3"))
+
+
 def _norm_label(s: Any) -> str:
     if s is None:
         return ""
@@ -175,6 +187,45 @@ def _norm_label(s: Any) -> str:
     out = out.replace("  ", " ")
     out = " ".join(out.split())
     return out
+
+
+def load_learned_profiles(path: Path = LEARNED_PROFILE_PATH) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text())
+    except Exception:
+        return {}
+
+    # Normalize lookup keys for fast matching.
+    out: Dict[str, Any] = {
+        "meta": raw.get("meta", {}),
+        "global_profile": raw.get("global_profile", {}),
+    }
+    for section in ("occupation", "hobbies", "usage", "daily_distance"):
+        sec = raw.get(section, {})
+        if not isinstance(sec, dict):
+            out[section] = {}
+            continue
+        out[section] = {_norm_label(k): v for k, v in sec.items()}
+    return out
+
+
+LEARNED_PROFILES: Dict[str, Any] = load_learned_profiles()
+LEARNED_PROFILES_MTIME: Optional[float] = None
+
+
+def _get_learned_profiles() -> Dict[str, Any]:
+    global LEARNED_PROFILES, LEARNED_PROFILES_MTIME
+    try:
+        if LEARNED_PROFILE_PATH.exists():
+            mtime = LEARNED_PROFILE_PATH.stat().st_mtime
+            if LEARNED_PROFILES_MTIME is None or mtime != LEARNED_PROFILES_MTIME:
+                LEARNED_PROFILES = load_learned_profiles()
+                LEARNED_PROFILES_MTIME = mtime
+    except Exception:
+        return LEARNED_PROFILES
+    return LEARNED_PROFILES
 
 
 def minmax_series(series: pd.Series) -> pd.Series:
@@ -206,6 +257,103 @@ def average_map(
     if not bucket:
         return {k: float(default) for k in keys}
 
+    out: Dict[str, float] = {}
+    for key in keys:
+        vals = [float(b.get(key, default)) for b in bucket]
+        out[key] = float(np.mean(vals)) if vals else float(default)
+    return out
+
+
+def _profile_meta_value(key: str, default: Any) -> Any:
+    meta = _get_learned_profiles().get("meta", {})
+    if isinstance(meta, dict) and key in meta:
+        return meta.get(key)
+    return default
+
+
+def _learned_section(section: str) -> Dict[str, Any]:
+    sec = _get_learned_profiles().get(section, {})
+    return sec if isinstance(sec, dict) else {}
+
+
+def _learned_profile(section: str, label: Any) -> Optional[Dict[str, Any]]:
+    if not label:
+        return None
+    sec = _learned_section(section)
+    return sec.get(_norm_label(label))
+
+
+def _global_profile() -> Dict[str, float]:
+    gp = _get_learned_profiles().get("global_profile", {})
+    return gp if isinstance(gp, dict) else {}
+
+
+def _blend_profiles(
+    rule_profile: Mapping[str, float],
+    learned_profile: Mapping[str, float],
+    keys: Sequence[str],
+    alpha: float,
+    default: float,
+) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    for key in keys:
+        rule_val = float(rule_profile.get(key, default))
+        data_val = float(learned_profile.get(key, default))
+        out[key] = alpha * data_val + (1 - alpha) * rule_val
+    return out
+
+
+def _hybrid_profile_for_label(
+    label: Any,
+    rule_map: Mapping[str, Mapping[str, float]],
+    section: str,
+    keys: Sequence[str],
+    default: float = 0.5,
+    fallback_label: Optional[str] = None,
+) -> Dict[str, float]:
+    alpha = float(_profile_meta_value("alpha", DEFAULT_HYBRID_ALPHA))
+    min_samples = int(_profile_meta_value("min_samples", DEFAULT_MIN_SAMPLES))
+    rule_vec = _mapped_by_normalized_key(label, rule_map)
+    if rule_vec is None and fallback_label:
+        rule_vec = _mapped_by_normalized_key(fallback_label, rule_map)
+    learned_payload = _learned_profile(section, label)
+    learned_count = int(learned_payload.get("count", 0)) if isinstance(learned_payload, dict) else 0
+    learned_profile = learned_payload.get("profile", {}) if isinstance(learned_payload, dict) else {}
+
+    if learned_profile and learned_count >= min_samples and rule_vec:
+        return _blend_profiles(rule_vec, learned_profile, keys, alpha, default)
+    if learned_profile and learned_count >= min_samples and not rule_vec:
+        return {k: float(learned_profile.get(k, default)) for k in keys}
+    if rule_vec:
+        return {k: float(rule_vec.get(k, default)) for k in keys}
+
+    global_profile = _global_profile()
+    if global_profile:
+        return {k: float(global_profile.get(k, default)) for k in keys}
+    return {k: float(default) for k in keys}
+
+
+def hybrid_average_map(
+    selected_list: Optional[Sequence[str]],
+    rule_map: Mapping[str, Mapping[str, float]],
+    section: str,
+    keys: Sequence[str],
+    default: float = 0.5,
+) -> Dict[str, float]:
+    selected = selected_list or []
+    bucket: List[Mapping[str, float]] = []
+    for item in selected:
+        bucket.append(
+            _hybrid_profile_for_label(
+                item,
+                rule_map,
+                section,
+                keys,
+                default=default,
+            )
+        )
+    if not bucket:
+        return {k: float(default) for k in keys}
     out: Dict[str, float] = {}
     for key in keys:
         vals = [float(b.get(key, default)) for b in bucket]
@@ -261,22 +409,36 @@ def build_user_vector_from_quiz(
     usage = user_input.get("usage") or []
     daily_distance = user_input.get("daily_distance") or "Medium commute (30-80 km)"
 
-    occ_vec = _mapped_by_normalized_key(occupation, OCCUPATION_MAP) or OCCUPATION_MAP["Others"]
-    hobby_avg = average_map(
+    occ_vec = _hybrid_profile_for_label(
+        occupation,
+        OCCUPATION_MAP,
+        "occupation",
+        ["price_weight", "hp_weight", "ev_weight", "seats_weight"],
+        default=0.5,
+        fallback_label="Others",
+    )
+    hobby_avg = hybrid_average_map(
         hobbies,
         HOBBY_MAP,
+        "hobbies",
         ["cargo_weight", "suv_pref", "range_weight", "torque_weight"],
         default=0.5,
     )
-    usage_avg = average_map(
+    usage_avg = hybrid_average_map(
         usage,
         USAGE_MAP,
+        "usage",
         ["suv_pref", "sedan_pref", "efficiency_weight", "cargo_weight", "range_weight"],
         default=0.5,
     )
-    dd_vec = _mapped_by_normalized_key(daily_distance, DAILY_DISTANCE_MAP) or DAILY_DISTANCE_MAP[
-        "Medium commute (30-80 km)"
-    ]
+    dd_vec = _hybrid_profile_for_label(
+        daily_distance,
+        DAILY_DISTANCE_MAP,
+        "daily_distance",
+        ["ev_weight", "hev_weight", "ice_weight", "range_priority"],
+        default=0.5,
+        fallback_label="Medium commute (30-80 km)",
+    )
 
     combined: Dict[str, float] = {k: 0.0 for k in FEATURE_ORDER}
 

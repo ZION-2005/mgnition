@@ -33,46 +33,16 @@ const fallbackModelImages = {
 
 const quizQuestions = [
   {
-    key: 'style',
-    type: 'single',
-    prompt: 'What design style feels most like you?',
-    options: ['Classic & Timeless', 'Sporty & Bold', 'Luxury & Elegant'],
-  },
-  {
     key: 'budget',
     type: 'single',
     prompt: 'What is your budget for your next MG?',
     options: ['Below 700,000 THB', '700,000 - 999,999 THB', '1,000,000 - 1,299,999 THB', '1,300,000 THB and above'],
   },
   {
-    key: 'postalCode',
-    type: 'input',
-    prompt: 'Enter your postal code so we can match nearby showrooms',
-    placeholder: 'e.g. 10110',
-  },
-  {
-    key: 'usage',
+    key: 'fuelType',
     type: 'single',
-    prompt: 'How do you use your car most of the time?',
-    options: ['City commuting', 'Cargo & Practical use', 'Highway/Long-distance', 'Eco-conscious lifestyle'],
-  },
-  {
-    key: 'hobbies',
-    type: 'multi',
-    prompt: 'What are your hobbies? (Choose more than one)',
-    options: ['City Life & Socializing', 'Adventure & Travel', 'Relaxed & Minimalist Lifestyle', 'Outdoor Sports & Fitness'],
-  },
-  {
-    key: 'occupation',
-    type: 'single',
-    prompt: 'What is your occupation?',
-    options: ['Student', 'Working Professional', 'Business Owner', 'Family-Oriented', 'Retired', 'Others'],
-  },
-  {
-    key: 'distance',
-    type: 'single',
-    prompt: 'On average, how far do you drive each day?',
-    options: ['Short distance (0-30 km)', 'Medium commute (30-80 km)', 'Long commute (80-150 km)', 'Very long distance (Over 150 km)'],
+    prompt: 'Which type of fuel fits your lifestyle and driving habits?',
+    options: ['Hybrid', 'Petrol (Gasoline)', 'Diesel', 'EV (Electric)'],
   },
   {
     key: 'seats',
@@ -81,10 +51,28 @@ const quizQuestions = [
     options: ['2 seats', '3-5 seats', '5+ seats'],
   },
   {
-    key: 'fuelType',
+    key: 'distance',
     type: 'single',
-    prompt: 'Which type of fuel fits your lifestyle and driving habits?',
-    options: ['Hybrid', 'Petrol (Gasoline)', 'Diesel', 'EV (Electric)'],
+    prompt: 'On average, how far do you drive each day?',
+    options: ['Short distance (0-30 km)', 'Medium commute (30-80 km)', 'Long commute (80-150 km)', 'Very long distance (Over 150 km)'],
+  },
+  {
+    key: 'occupation',
+    type: 'single',
+    prompt: 'What is your occupation?',
+    options: ['Student', 'Working Professional', 'Business Owner', 'Family-Oriented', 'Retired', 'Others'],
+  },
+  {
+    key: 'hobbies',
+    type: 'multi',
+    prompt: 'What are your hobbies? (Choose more than one)',
+    options: ['City Life & Socializing', 'Adventure & Travel', 'Relaxed & Minimalist Lifestyle', 'Outdoor Sports & Fitness'],
+  },
+  {
+    key: 'usage',
+    type: 'single',
+    prompt: 'How do you use your car most of the time?',
+    options: ['City commuting', 'Cargo & Practical use', 'Highway/Long-distance', 'Eco-conscious lifestyle'],
   },
   {
     key: 'preferredColors',
@@ -504,6 +492,8 @@ export default function App() {
   const [answers, setAnswers] = useState({});
   const [selectedCar, setSelectedCar] = useState(null);
   const [results, setResults] = useState([]);
+  const [recommendError, setRecommendError] = useState('');
+  const [showMoreReasons, setShowMoreReasons] = useState(false);
   const [province, setProvince] = useState('Bangkok');
   const [loading, setLoading] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -552,6 +542,10 @@ export default function App() {
       setPage('showrooms');
     }
   }, [page, isGuest, isAdmin]);
+
+  useEffect(() => {
+    setShowMoreReasons(false);
+  }, [selectedCar?.variant_key, selectedCar?.model, selectedCar?.variant]);
   const [savedCars, setSavedCars] = useState([]);
   const resultReasonMap = useMemo(() => {
     const map = new Map();
@@ -768,12 +762,6 @@ export default function App() {
     const all = [...new Set(showroomsData.map((s) => provinceFromShowroom(s)))].sort();
     return all.length ? all : ['Bangkok'];
   }, []);
-
-  useEffect(() => {
-    if (!showroomPostal && answers.postalCode) {
-      setShowroomPostal(String(answers.postalCode));
-    }
-  }, [answers, showroomPostal]);
 
   const filteredShowrooms = useMemo(() => {
     const selected = normalizeProvince(province);
@@ -1278,6 +1266,7 @@ export default function App() {
 
   const onGetResults = async (targetPage = 'results') => {
     setLoading(true);
+    setRecommendError('');
     try {
       const payload = {
         ...answers,
@@ -1314,9 +1303,17 @@ export default function App() {
         },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error('fallback');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || errData.error || 'Recommendation engine unavailable.');
+      }
       const data = await res.json();
       const mapped = mapApiResultsToModels(data.recommendations || data.results || [], models, variantByKey);
+      if (!mapped.length) {
+        setResults([]);
+        setRecommendError(data.message || 'No matching cars found for your current preferences.');
+        return;
+      }
       const base = mapped.length ? mapped : getFilteredLocalResults();
       const fallbackPool = [
         ...getFilteredLocalResults(),
@@ -1324,13 +1321,9 @@ export default function App() {
         ...(models || [])
       ];
       setResults(ensureMinResults(base, fallbackPool, 3));
-    } catch {
-      const fallbackPool = [
-        ...getFilteredLocalResults(),
-        ...(bestSellerCars || []),
-        ...(models || [])
-      ];
-      setResults(ensureMinResults(getFilteredLocalResults(), fallbackPool, 3));
+    } catch (err) {
+      setResults([]);
+      setRecommendError(err?.message || 'Recommendation engine unavailable.');
     } finally {
       setLoading(false);
       setActiveNav(targetPage === 'home' ? 'Home' : 'Recommended Cars');
@@ -2138,11 +2131,19 @@ export default function App() {
           <h2>Best Matches Based On Your Preferences</h2>
           {hasQuizAnswers ? (
             <>
-              <button className="btn light" type="button" onClick={() => { setActiveNav('Our Models'); setPage('models'); }}>
-                Back to Our Models
+              <button
+                className="btn light"
+                type="button"
+                onClick={() => {
+                  setOnboardingStep(0);
+                  setPage('onboarding');
+                }}
+              >
+                Update Preferences
               </button>
+              {recommendError && <p className="auth-error">{recommendError}</p>}
               <div className="cards three">
-                {(results.length ? results : bestSellerCars).slice(0, 3).map((car) => (
+                {(recommendError ? [] : (results.length ? results : bestSellerCars)).slice(0, 3).map((car) => (
                   <CarCard
                     key={savedCarKey(car)}
                     car={car}
@@ -2394,18 +2395,40 @@ export default function App() {
           </div>
 
           {(() => {
-            const explicitReasons = selectedCar.explanation?.top_reasons || [];
+            const explicitTopReasons = selectedCar.explanation?.top_reasons || [];
+            const explicitMoreReasons = selectedCar.explanation?.more_reasons || [];
             const fallbackReasons = buildQuizReasons(answers, selectedCar);
-            const reasons = explicitReasons.length ? explicitReasons : fallbackReasons;
+            const topReasons = explicitTopReasons.length ? explicitTopReasons.slice(0, 3) : fallbackReasons.slice(0, 3);
+            const moreReasons = explicitTopReasons.length ? explicitMoreReasons.slice(0, 5) : [];
             return (
-              !!reasons.length && (
+              !!topReasons.length && (
             <article className="detail-explainer">
               <h3>Why this was recommended</h3>
               <ul>
-                {reasons.map((reason, idx) => (
+                {topReasons.map((reason, idx) => (
                   <li key={`reason-${idx}`}>{reason}</li>
                 ))}
               </ul>
+              {!!moreReasons.length && (
+                <>
+                  {showMoreReasons && (
+                    <ul className="detail-explainer-more">
+                      {moreReasons.map((reason, idx) => (
+                        <li key={`reason-more-${idx}`}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="detail-explainer-actions">
+                    <button
+                      className="btn light"
+                      type="button"
+                      onClick={() => setShowMoreReasons((prev) => !prev)}
+                    >
+                      {showMoreReasons ? 'Show less' : 'Show more'}
+                    </button>
+                  </div>
+                </>
+              )}
             </article>
               )
             );
