@@ -1,0 +1,181 @@
+{
+  "meta": {
+    "alpha": 0.7,
+    "min_samples": 3,
+    "built_at": "2026-02-17T18:48:52Z",
+    "source_mode": "survey",
+    "feedback_interactions": 0,
+    "survey_interactions": 53,
+    "section_weights": {
+      "occupation": 0.2610540936800679,
+      "hobbies": 0.2318851763253337,
+      "usage": 0.25055945674820584,
+      "daily_distance": 0.2565012732463925
+    },
+    "q11_factor_weights": {
+      "Price": 0.2251572327044025,
+      "Fuel & Efficiency": 0.21383647798742136,
+      "Space & Practicality": 0.18993710691823898,
+      "Performance": 0.19496855345911948,
+      "Design": 0.17610062893081757
+    },
+    "q11_rank_counts": {
+      "Price": 53,
+      "Fuel & Efficiency": 53,
+      "Space & Practicality": 53,
+      "Performance": 53,
+      "Design": 53
+    }
+  },
+  "global_profile": {
+    "price_weight": 0.08996254194776528,
+    "hp_weight": 0.09999431689020229,
+    "seats_weight": 0.6000000000000006,
+    "range_weight": 0.5512010113780026,
+    "cargo_weight": 0.2850510264625611,
+    "torque_weight": 0.1449820581085775,
+    "suv_pref": 0.4528301886792453,
+    "sedan_pref": 0.5471698113207547,
+    "fuel_ev_weight": 0.3584905660377358,
+    "fuel_hev_weight": 0.5660377358490566,
+    "fuel_ice_weight": 0.07547169811320754,
+    "efficiency_weight": 0.7067834442720584
+  },
+  "occupation": {
+    "Student": {
+      "count": 47,
+      "profile": {
+        "price_weight": 0.08853116086014033,
+        "hp_weight": 0.10032683927198155,
+        "ev_weight": 0.3404255319148936,
+        "seats_weight": 0.6000000000000005
+      }
+    },
+    "Working Professional": {
+      "count": 5,
+      "profile": {
+        "price_weight": 0.0856306922750224,
+        "hp_weight": 0.09789156626506024,
+        "ev_weight": 0.4,
+        "seats_weight": 0.6
+      }
+    },
+    "Business Owner": {
+      "count": 1,
+      "profile": {
+        "price_weight": 0.17889670142985228,
+        "hp_weight": 0.09487951807228916,
+        "ev_weight": 1.0,
+        "seats_weight": 0.6
+      }
+    }
+  },
+  "hobbies": {
+    "Relaxed & Minimalist Lifestyle": {
+      "count": 38,
+      "profile": {
+        "cargo_weight": 0.2668404501820591,
+        "suv_pref": 0.42105263157894735,
+        "range_weight": 0.5844700246190697,
+        "torque_weight": 0.1428802066515984
+      }
+    },
+    "Outdoor Sports & Fitness": {
+      "count": 21,
+      "profile": {
+        "cargo_weight": 0.2311695118298891,
+        "suv_pref": 0.5714285714285714,
+        "range_weight": 0.5640238396243454,
+        "torque_weight": 0.14168857727139933
+      }
+    },
+    "City Life & Socializing": {
+      "count": 18,
+      "profile": {
+        "cargo_weight": 0.21571453529000698,
+        "suv_pref": 0.6666666666666666,
+        "range_weight": 0.628810226155359,
+        "torque_weight": 0.12866394001363327
+      }
+    },
+    "Adventure & Travel": {
+      "count": 32,
+      "profile": {
+        "cargo_weight": 0.26636202830188677,
+        "suv_pref": 0.5625,
+        "range_weight": 0.581384323640961,
+        "torque_weight": 0.13803680981595093
+      }
+    }
+  },
+  "usage": {
+    "Highway/Long-distance": {
+      "count": 15,
+      "profile": {
+        "suv_pref": 0.6666666666666666,
+        "sedan_pref": 0.3333333333333333,
+        "efficiency_weight": 0.6986454465075153,
+        "cargo_weight": 0.2878930817610062,
+        "range_weight": 0.6547829751369575
+      }
+    },
+    "City commuting": {
+      "count": 34,
+      "profile": {
+        "suv_pref": 0.3235294117647059,
+        "sedan_pref": 0.6764705882352942,
+        "efficiency_weight": 0.750157590887814,
+        "cargo_weight": 0.27589715131335557,
+        "range_weight": 0.5409013162787241
+      }
+    },
+    "Eco-conscious lifestyle": {
+      "count": 4,
+      "profile": {
+        "suv_pref": 0.75,
+        "sedan_pref": 0.25,
+        "efficiency_weight": 0.3686206896551725,
+        "cargo_weight": 0.3522012578616352,
+        "range_weight": 0.2503160556257901
+      }
+    }
+  },
+  "daily_distance": {
+    "Medium commute (30\u201380 km)": {
+      "count": 22,
+      "profile": {
+        "ev_weight": 0.36363636363636365,
+        "hev_weight": 0.5909090909090909,
+        "ice_weight": 0.045454545454545456,
+        "range_priority": 0.5670037926675096
+      }
+    },
+    "Short distance (0\u201330 km)": {
+      "count": 25,
+      "profile": {
+        "ev_weight": 0.36,
+        "hev_weight": 0.64,
+        "ice_weight": 0.0,
+        "range_priority": 0.5556510745891279
+      }
+    },
+    "Long commute (80\u2013150 km)": {
+      "count": 4,
+      "profile": {
+        "ev_weight": 0.5,
+        "hev_weight": 0.25,
+        "ice_weight": 0.25,
+        "range_priority": 0.44658659924146654
+      }
+    },
+    "Very long distance (Over 150 km)": {
+      "count": 2,
+      "profile": {
+        "ev_weight": 0.0,
+        "hev_weight": 0.0,
+        "ice_weight": 1.0,
+        "range_priority": 0.5309734513274337
+      }
+    }
+  }
+}

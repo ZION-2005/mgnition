@@ -1,170 +1,266 @@
 [
   {
     "id": "BKK01",
-    "name": "MG Sukhumvit 62",
-    "address": "21 Sukhumvit 62, Phra Khanong Tai, Bangkok 10260",
-    "lat": 13.7201,
-    "lng": 100.5843,
-    "phone": "02-311-7900"
-  },
-  {
-    "id": "BKK02",
-    "name": "MG Best Bangna",
-    "address": "Bangna-Trat Rd, Bang Na, Bangkok 10260",
-    "lat": 13.6687,
-    "lng": 100.6446,
-    "phone": "-"
-  },
-  {
-    "id": "BKK03",
-    "name": "MG Rungcharoen Nawamin",
-    "address": "Nawamin Rd, Bueng Kum, Bangkok 10240",
-    "lat": 13.8035,
-    "lng": 100.639,
-    "phone": "02-944-4499"
-  },
-  {
-    "id": "BKK04",
-    "name": "MG Rungcharoen Ladkrabang",
-    "address": "Ladkrabang Rd, Lat Krabang, Bangkok 10520",
-    "lat": 13.7288,
-    "lng": 100.7372,
+    "name": "MG Rungjaroen Co.,Ltd. (Lat Krabang Branch)",
+    "address": "578/9 Lat Krabang Road, Lat Krabang Subdistrict, Lat Krabang District, Bangkok 10520",
+    "lat": 13.722272,
+    "lng": 100.734459,
     "phone": "02-034-5000"
   },
   {
+    "id": "BKK02",
+    "name": "Best Auto Sales Co., Ltd. (Bangna Branch)",
+    "address": "1 The Parkland Road, Bang Na Nuea Subdistrict, Bang Na District, Bangkok 10260",
+    "lat": 13.665365,
+    "lng": 100.649785,
+    "phone": "02-745-9190"
+  },
+  {
+    "id": "BKK03",
+    "name": "MG Saengaree Auto Co., Ltd. (Head Office)",
+    "address": "468 Srinagarindra Road, Nong Bon Subdistrict, Prawet District, Bangkok 10250",
+    "lat": 13.680445,
+    "lng": 100.645853,
+    "phone": "02-743-3955"
+  },
+  {
+    "id": "BKK04",
+    "name": "Best Auto Sales Co., Ltd. (Head Office)",
+    "address": "1687/1 Petchkasem Road, Lak Song Subdistrict, Bang Khae District, Bangkok 10160",
+    "lat": 13.708307,
+    "lng": 100.384331,
+    "phone": "02-444-2333"
+  },
+  {
     "id": "BKK05",
-    "name": "MG Sirindhorn",
-    "address": "Sirindhorn Rd, Bang Phlat, Bangkok 10700",
-    "lat": 13.7956,
-    "lng": 100.5078,
-    "phone": "-"
+    "name": "MG Sales (Thailand) Co., Ltd.",
+    "address": "Silom Complex, 25th Floor, Silom Road, Bang Rak, Bangkok 10500",
+    "lat": 13.728079,
+    "lng": 100.535453,
+    "phone": "1267"
   },
   {
     "id": "BKK06",
-    "name": "MG Triple M Ratchada-Taksin",
-    "address": "Ratchadaphisek Rd, Thon Buri, Bangkok 10600",
-    "lat": 13.7089,
-    "lng": 100.4882,
-    "phone": "-"
+    "name": "Sky Automotive Co., Ltd. (Sirindhorn Branch)",
+    "address": "346 Sirindhorn Road, Bang Phlat, Bangkok 10700",
+    "lat": 13.790357,
+    "lng": 100.476504,
+    "phone": "02-447-9393"
   },
   {
     "id": "BKK07",
-    "name": "MG Srinakarin",
-    "address": "Srinakarin Rd, Suan Luang, Bangkok 10250",
-    "lat": 13.7416,
-    "lng": 100.6462,
-    "phone": "-"
+    "name": "824 Co., Ltd. (Ratchapruek)",
+    "address": "35 Ratchaphruek Road, Bang Phrom, Taling Chan, Bangkok 10170",
+    "lat": 13.749827,
+    "lng": 100.446371,
+    "phone": "02-470-5824"
   },
   {
     "id": "BKK08",
-    "name": "MG Supreme Onnut",
-    "address": "Onnut Rd, Suan Luang, Bangkok 10250",
-    "lat": 13.7059,
-    "lng": 100.6074,
-    "phone": "-"
+    "name": "MG Ant Bangbon Co.,Ltd.",
+    "address": "1008 Ekkachai Road, Bang Bon Nuea, Bang Bon, Bangkok 10150",
+    "lat": 13.67195,
+    "lng": 100.42223,
+    "phone": "02-416-7888"
   },
   {
-    "id": "SPK01",
-    "name": "MG Rungcharoen Thepharak",
-    "address": "Thepharak Rd, Mueang Samut Prakan, Samut Prakan 10270",
-    "lat": 13.6259,
-    "lng": 100.6042,
-    "phone": "02-755-7799"
+    "id": "BKK09",
+    "name": "MG Paragon Sales Co., Ltd.",
+    "address": "5/48 Saimai Road, Saimai, Bangkok 10220",
+    "lat": 13.921171,
+    "lng": 100.657313,
+    "phone": "02-990-5941"
   },
   {
-    "id": "SPK02",
-    "name": "MG Rungcharoen Suksawat",
-    "address": "Suksawat Rd, Phra Pradaeng, Samut Prakan 10130",
-    "lat": 13.6806,
-    "lng": 100.514,
-    "phone": "02-405-4949"
+    "id": "BKK10",
+    "name": "KAS Motors Co., Ltd.",
+    "address": "804 Charansanitwong Road, Bang O Subdistrict, Bang Phlat District, Bangkok 10700",
+    "lat": 13.806295,
+    "lng": 100.512431,
+    "phone": "02-880-0051"
   },
   {
-    "id": "SPK03",
-    "name": "MG Able Samutprakan",
-    "address": "Srinagarindra Rd, Mueang Samut Prakan, Samut Prakan 10270",
-    "lat": 13.602,
-    "lng": 100.61,
-    "phone": "-"
+    "id": "BKK11",
+    "name": "MG KP Auto Co., Ltd. (Laksi Branch)",
+    "address": "201/3 Vibhavadi-Rangsit Road, Thung Song Hong, Lak Si, Bangkok 10210",
+    "lat": 13.886091,
+    "lng": 100.583088,
+    "phone": "02-973-4411"
   },
   {
-    "id": "SPK04",
-    "name": "MG Bangpu",
-    "address": "Bang Pu Industrial Estate, Samut Prakan 10280",
-    "lat": 13.5116,
-    "lng": 100.6871,
-    "phone": "-"
+    "id": "BKK12",
+    "name": "MG Saengaree Auto Co., Ltd. (Hathairat)",
+    "address": "251 Hathairat Road, Sam Wa Tawan Tok, Khlong Sam Wa, Bangkok 10510",
+    "lat": 13.868475,
+    "lng": 100.722349,
+    "phone": "02-906-9555"
   },
   {
-    "id": "NON01",
-    "name": "MG Rattanathibet",
-    "address": "Rattanathibet Rd, Bang Kraso, Nonthaburi 11000",
-    "lat": 13.8885,
-    "lng": 100.4915,
-    "phone": "-"
+    "id": "BKK13",
+    "name": "KP Auto Khlong Luang Co., Ltd. (Vibhavadi Road)",
+    "address": "120 Soi Intamara 18, Vibhavadi-Rangsit Road, Din Daeng, Bangkok 10400",
+    "lat": 13.783509,
+    "lng": 100.559473,
+    "phone": "02-973-4411"
   },
   {
-    "id": "NON02",
-    "name": "MG Pracharat 21",
-    "address": "Pracharat Rd 21, Mueang Nonthaburi, Nonthaburi 11000",
-    "lat": 13.8595,
-    "lng": 100.5151,
-    "phone": "-"
+    "id": "BKK14",
+    "name": "Triple M Auto Sales Co., Ltd.",
+    "address": "776/1 Ratchadaphisek Road (Thapra-Taksin), Dao Khanong, Thon Buri, Bangkok 10600",
+    "lat": 13.706082,
+    "lng": 100.482646,
+    "phone": "02-476-4000"
   },
   {
-    "id": "PT01",
-    "name": "MG Able Pathum Thani",
-    "address": "Mueang Pathum Thani, Pathum Thani 12000",
-    "lat": 14.02,
-    "lng": 100.55,
-    "phone": "-"
+    "id": "BKK15",
+    "name": "MG Rungjaroen Co.,Ltd. (Sukhumvit Branch)",
+    "address": "3588 Sukhumvit Road, Bang Na Tai, Bang Na, Bangkok 10260",
+    "lat": 13.666788,
+    "lng": 100.603877,
+    "phone": "02-361-1999"
   },
   {
-    "id": "PT02",
-    "name": "MG Rangsit",
-    "address": "Rangsit-Nakhon Nayok Rd, Pathum Thani 12130",
-    "lat": 14.0107,
-    "lng": 100.6163,
-    "phone": "-"
+    "id": "BKK16",
+    "name": "Auto Gallery Brit Co., Ltd.",
+    "address": "21 Sukhumvit 62, Bang Chak, Phra Khanong, Bangkok 10260",
+    "lat": 13.694869,
+    "lng": 100.604371,
+    "phone": "02-311-7900"
   },
   {
-    "id": "AY01",
-    "name": "MG Ayutthaya",
-    "address": "Bang Pa-In, Phra Nakhon Si Ayutthaya 13160",
-    "lat": 14.279,
-    "lng": 100.574,
-    "phone": "-"
+    "id": "BKK17",
+    "name": "Wish Motors Co., Ltd.",
+    "address": "333/33 Pradit Manutham Road, Wang Thonglang, Bangkok 10310",
+    "lat": 13.783944,
+    "lng": 100.607472,
+    "phone": "02-530-1111"
   },
   {
-    "id": "AY02",
-    "name": "MG Sena Ayutthaya",
-    "address": "Sena District, Ayutthaya 13110",
-    "lat": 14.3275,
-    "lng": 100.4042,
-    "phone": "-"
+    "id": "BKK18",
+    "name": "MG Krungthep Co., Ltd.",
+    "address": "89 Moo 8, Suwinthawong Road, Khok Faed, Nong Chok, Bangkok 10530",
+    "lat": 13.80974,
+    "lng": 100.803511,
+    "phone": "02-089-1642"
   },
   {
-    "id": "SSK01",
-    "name": "MG Mahachai",
-    "address": "Rama 2 Rd, Mueang Samut Sakhon, Samut Sakhon 74000",
-    "lat": 13.5352,
-    "lng": 100.2766,
-    "phone": "034-406-644"
+    "id": "BKK19",
+    "name": "MG Supreme Co., Ltd.",
+    "address": "1640 On Nut Road, On Nut, Suan Luang, Bangkok 10250",
+    "lat": 13.710533,
+    "lng": 100.634743,
+    "phone": "02-721-4333"
   },
   {
-    "id": "NPT01",
-    "name": "MG Nakhon Pathom",
-    "address": "Mueang Nakhon Pathom, Nakhon Pathom 73000",
-    "lat": 13.822,
-    "lng": 100.044,
-    "phone": "-"
+    "id": "BKK20",
+    "name": "MG Able Motors Co.,Ltd. (Ramkhamhaeng Branch)",
+    "address": "396/2 Ramkhamhaeng Road, Rat Phatthana, Saphan Sung, Bangkok 10240",
+    "lat": 13.788474,
+    "lng": 100.694944,
+    "phone": "092-961-4646"
   },
   {
-    "id": "NPT02",
-    "name": "MG Kamphaeng Saen",
-    "address": "Kamphaeng Saen, Nakhon Pathom 73140",
-    "lat": 14.0064,
-    "lng": 99.9769,
-    "phone": "-"
+    "id": "SPK21",
+    "name": "MG Nakornluang Company Limited (Head Office)",
+    "address": "129/39 Moo 4, Bangna-Trad Road, Bang Chalong Subdistrict, Bang Phli District, Samut Prakan Province 10540",
+    "lat": "13.62997691240235",
+    "lng": "100.71983048028565",
+    "phone": "02-750-2753, 092-983-6491"
+  },
+  {
+    "id": "SPK22",
+    "name": "MG Rungjaroen Co., Ltd. (Head Office), Thepharak",
+    "address": "3456 Moo 6, Theparak Road, Theparak Subdistrict, Mueang District, Samut Prakan Province 10270",
+    "lat": "13.620955003201562",
+    "lng": "100.64258227087323",
+    "phone": "02-755-7799, 089-883-0685"
+  },
+  {
+    "id": "NPT23",
+    "name": "Ch. Erawan Automobile Nakhon Pathom Co., Ltd.", 
+    "address": "199 Moo 1, Phetkasem Road, Thammasala Subdistrict, Mueang Nakhon Pathom District, Nakhon Pathom Province 73000",
+    "lat": "NaN",
+    "lng": "NaN",
+    "phone": "034-305-505"
+  },
+  {
+    "id": "AY024",
+    "name": "Ayutthaya Grand MG Sales and Service Co., Ltd.",
+    "address": "48/11 Moo 7, Asia Highway, Khlong Suan Phlu Subdistrict, Phra Nakhon Si Ayutthaya District, Phra Nakhon Si Ayutthaya Province 13000",
+    "lat": "14.323125088392311",
+    "lng": "100.61403458211795",
+    "phone": "035-355-888"
+  },
+  {
+    "id": "NPT25",
+    "name": "MG Nakornluang Company Limited (Nakhon Pathom Branch)",
+    "address": "21/1 Songphol Road, Lamphaya Subdistrict, Mueang District, Nakhon Pathom Province 73000",
+    "lat": "13.815836670923765",
+    "lng": "100.04199440235861",
+    "phone": "034-146-700"
+  },
+  {
+    "id": "LBR26",
+    "name": "MG L.K.S. Lamnarai Co., Ltd.", 
+    "address": "342 Moo 1, Chai Narai Subdistrict, Chai Badan District, Lopburi Province 15130",
+    "lat": "15.212241508075532",
+    "lng": "101.12163367602881",
+    "phone": "036-461-806"
+  },
+  {
+    "id": "NRM27",
+    "name": "Lui Motor Company Limited",
+    "address": "475 Moo 10, Khok Kruat Subdistrict, Mueang Nakhon Ratchasima District, Nakhon Ratchasima Province 30280",
+    "lat": "15.076608058191212",
+    "lng": "102.14299314175263",
+    "phone": "044-007-688"
+  },
+  {
+    "id": "NRM28",
+    "name": "Patchapee Thong Auto Co., Ltd. (in the city)",
+    "address": "1196, 1198, 1200 Mittraphap Road, Nai Mueang Subdistrict, Mueang Nakhon Ratchasima District, Nakhon Ratchasima Province 30000",
+    "lat": "NaN",
+    "lng": "NaN",
+    "phone": "044-242-404"
+  },
+  {
+    "id": "SRT29",
+    "name": "MG Luxury Hat Yai Co., Ltd. (Surat Thani Branch)",
+    "address": "168 Moo 1, Wat Pradu Subdistrict, Mueang Surat Thani District, Surat Thani Province 84000",
+    "lat": "9.12356920129973",
+    "lng": "99.28306450848837",
+    "phone": "077-200-722"
+  },
+  {
+    "id": "SKN30",
+    "name": "Phichitphet Sakon Nakhon Company Limited",
+    "address": "343 Sakon Nakhon-Kalasin Road, That Choeng Chum Subdistrict, Mueang District, Sakon Nakhon Province 47000",
+    "lat": "17.147838509450935",
+    "lng": "104.13214699318522",
+    "phone": "042-712-044"
+  },
+  {
+    "id": "SKN31",
+    "name": "Last Auto Sales and Service Co., Ltd.",
+    "address": "593/6 Nitayo Road, Thatchoengchum Subdistrict, Mueang Sakon Nakhon District, Sakon Nakhon Province 47000",
+    "lat": "17.19220879611803",
+    "lng": "104.11562918610561",
+    "phone": "088-340-0505"
+  },
+  {
+    "id": "PTN32",
+    "name": "A.N.N. Autosales (2016) Co., Ltd. (Pattani Branch)",
+    "address": "57/12 Moo 4, Rusame Lae Subdistrict, Mueang Pattani District, Pattani Province 94000",
+    "lat": "6.853995003548406",
+    "lng": "101.21872007814136",
+    "phone": "087-090-9999"
+  },
+  {
+    "id": "NRT33",
+    "name": "A.N.N. Autosales (2016) Co., Ltd. (Narathiwat Branch)",
+    "address": "280-280/4 Suriyapradit Road, Bang Nak Subdistrict, Mueang District, Narathiwat Province 96000",
+    "lat": "NaN",
+    "lng": "NaN",
+    "phone": "087-087-9999"
   }
 ]

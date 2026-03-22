@@ -153,6 +153,31 @@
     }
   },
   {
+    "Model": "MG MAXUS 9 Plus",
+    "Variant": "",
+    "Year": 2024.0,
+    "Price_THB": 1849000.0,
+    "Fuel_Type": "EV",
+    "Seats": 7.0,
+    "Body_Type": "MPV",
+    "Horsepower_hp": 245.0,
+    "Torque_Nm": 350.0,
+    "Cargo_Liters": 466.0,
+    "Length_mm": 5270.0,
+    "Width_mm": 2000.0,
+    "Height_mm": 1840.0,
+    "Wheelbase_mm": 3200.0,
+    "Range_km": 540.0,
+    "Fuel_Consumption_kmL": "-",
+    "Available_Colors": "Pearl White, Black Knight, Granite Grey",
+    "Image_URL": "",
+    "Color_Images": {
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/ec5d3c219edfd86c162dbb3ea9eca7f8.png",
+      "Pearl White": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/18942a471d290877b0edb44867cfc7e3.png",
+      "Granite Grey": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/a905c37cdfaeeb7f1bab990e66d9956f.png"
+    }
+  },
+  {
     "Model": "MG EP Plus",
     "Variant": "PLUS",
     "Year": 2024.0,

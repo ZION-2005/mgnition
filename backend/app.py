@@ -3,7 +3,9 @@ import os
 import secrets
 import smtplib
 import sqlite3
-from datetime import datetime, timedelta
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
@@ -33,6 +35,7 @@ COSINE_IMPORT_ERROR = ""
 try:
     import pandas as pd
 
+    from cosine_recommender import apply_choice_conversions
     from cosine_recommender import FEATURE_ORDER as COSINE_FEATURE_ORDER
     from cosine_recommender import score_cars_with_cosine
 
@@ -54,6 +57,12 @@ USE_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith
 MODEL_PATH = BASE_DIR / "models" / "recommender.joblib"
 SURVEY_REG_MODEL_PATH = BASE_DIR / "models" / "survey_regression.joblib"
 SURVEY_REG_BLEND_WEIGHT = float(os.getenv("SURVEY_REG_BLEND_WEIGHT", "0.15"))
+BUDGET_RELAX_RATIO = float(os.getenv("BUDGET_RELAX_RATIO", "0.10"))
+BUDGET_RELAX_MAX_THB = float(os.getenv("BUDGET_RELAX_MAX_THB", "200000"))
+FEEDBACK_MIN_SAMPLES = int(os.getenv("FEEDBACK_MIN_SAMPLES", "20"))
+FEEDBACK_BLEND_MIN = float(os.getenv("FEEDBACK_BLEND_MIN", "0.18"))
+FEEDBACK_BLEND_MAX = float(os.getenv("FEEDBACK_BLEND_MAX", "0.40"))
+FEEDBACK_BLEND_WARMUP_SAMPLES = int(os.getenv("FEEDBACK_BLEND_WARMUP_SAMPLES", "250"))
 
 
 def resolve_variant_data_path():
@@ -374,6 +383,7 @@ def init_db():
             """
             CREATE TABLE IF NOT EXISTS bookings (
                 id BIGSERIAL PRIMARY KEY,
+                booking_reference TEXT UNIQUE,
                 user_id BIGINT NOT NULL REFERENCES users(id),
                 user_name TEXT NOT NULL,
                 user_email TEXT NOT NULL,
@@ -388,27 +398,6 @@ def init_db():
                 notes TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS admin_models (
-                id BIGSERIAL PRIMARY KEY,
-                model TEXT NOT NULL,
-                variant TEXT,
-                year TEXT,
-                price_thb REAL,
-                fuel_type TEXT,
-                seats INTEGER,
-                body_type TEXT,
-                horsepower_hp REAL,
-                torque_nm REAL,
-                range_km REAL,
-                cargo_liters REAL,
-                image_url TEXT,
-                active INTEGER NOT NULL DEFAULT 1,
-                created_by BIGINT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
             )
             """,
             """
@@ -527,6 +516,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS bookings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                booking_reference TEXT UNIQUE,
                 user_id INTEGER NOT NULL,
                 user_name TEXT NOT NULL,
                 user_email TEXT NOT NULL,
@@ -542,26 +532,6 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS admin_models (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model TEXT NOT NULL,
-                variant TEXT,
-                year TEXT,
-                price_thb REAL,
-                fuel_type TEXT,
-                seats INTEGER,
-                body_type TEXT,
-                horsepower_hp REAL,
-                torque_nm REAL,
-                range_km REAL,
-                cargo_liters REAL,
-                image_url TEXT,
-                active INTEGER NOT NULL DEFAULT 1,
-                created_by INTEGER,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS best_sellers (
@@ -585,12 +555,26 @@ def init_db():
         db.execute("ALTER TABLE promotions ADD COLUMN variant_name TEXT")
     if not column_exists(db, "promotions", "variant_key"):
         db.execute("ALTER TABLE promotions ADD COLUMN variant_key TEXT")
+    if not column_exists(db, "bookings", "booking_reference"):
+        db.execute("ALTER TABLE bookings ADD COLUMN booking_reference TEXT")
+
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_reference ON bookings (booking_reference)")
 
     if USE_POSTGRES:
         ensure_pg_id_sequence_default(db, "promotions")
-        ensure_pg_id_sequence_default(db, "admin_models")
         ensure_pg_id_sequence_default(db, "bookings")
         ensure_pg_id_sequence_default(db, "best_sellers")
+
+    db.execute("DROP TABLE IF EXISTS admin_models")
+
+    missing_booking_refs = db.execute(
+        "SELECT id FROM bookings WHERE booking_reference IS NULL OR booking_reference = ''"
+    ).fetchall()
+    for row in missing_booking_refs:
+        db.execute(
+            "UPDATE bookings SET booking_reference = ? WHERE id = ?",
+            (generate_booking_reference(db), row["id"]),
+        )
 
     admin_count = db.execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0]
     if admin_count == 0:
@@ -674,6 +658,15 @@ def get_profile(user_id):
     }
 
 
+def generate_booking_reference(db):
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    while True:
+        candidate = f"MGN-{today}-{secrets.token_hex(2).upper()}"
+        exists = db.execute("SELECT 1 FROM bookings WHERE booking_reference = ? LIMIT 1", (candidate,)).fetchone()
+        if not exists:
+            return candidate
+
+
 def get_saved_variants(user_id):
     rows = get_db().execute(
         """
@@ -687,33 +680,149 @@ def get_saved_variants(user_id):
     return [dict(r) for r in rows]
 
 
-def send_password_reset_email(to_email, token):
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    reset_link = f"{frontend_url}/reset-password?token={token}"
-
+def smtp_settings():
     smtp_host = os.getenv("SMTP_HOST")
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@mgnition.local")
-
     if not smtp_host or not smtp_user or not smtp_pass:
-        return {"sent": False, "dev_token": token, "reset_link": reset_link}
+        return None
+    return {
+        "host": smtp_host,
+        "user": smtp_user,
+        "pass": smtp_pass,
+        "port": smtp_port,
+        "from": smtp_from,
+    }
 
-    msg = MIMEText(
-        f"Use this link to reset your MGNITION password:\n\n{reset_link}\n\nThis link expires in 30 minutes.",
-        "plain",
+
+def resend_settings():
+    api_key = clean_str(os.getenv("RESEND_API_KEY"))
+    from_email = clean_str(os.getenv("RESEND_FROM"))
+    reply_to = clean_str(os.getenv("RESEND_REPLY_TO"))
+    if not api_key or not from_email:
+        return None
+    return {"api_key": api_key, "from": from_email, "reply_to": reply_to}
+
+
+def send_plain_email_via_resend(to_email, subject, body):
+    cfg = resend_settings()
+    if not cfg:
+        return {"sent": False, "reason": "resend_not_configured"}
+
+    payload = {"from": cfg["from"], "to": [to_email], "subject": subject, "text": body}
+    if cfg["reply_to"]:
+        payload["reply_to"] = cfg["reply_to"]
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {cfg['api_key']}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
     )
-    msg["Subject"] = "MGNITION password reset"
-    msg["From"] = smtp_from
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            status = getattr(resp, "status", 200)
+            raw = resp.read().decode("utf-8", "ignore")
+        if 200 <= status < 300:
+            out = {}
+            try:
+                out = json.loads(raw) if raw else {}
+            except Exception:
+                out = {}
+            return {"sent": True, "provider": "resend", "id": out.get("id")}
+        return {"sent": False, "reason": "resend_send_failed", "status": status}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "ignore")
+        return {"sent": False, "reason": "resend_send_failed", "status": e.code, "error": raw[:300]}
+    except Exception as e:
+        return {"sent": False, "reason": "resend_send_failed", "error": str(e)}
+
+
+def send_plain_email_via_smtp(to_email, subject, body):
+    smtp = smtp_settings()
+    if not smtp:
+        return {"sent": False, "reason": "smtp_not_configured"}
+
+    msg = MIMEText(body, "plain")
+    msg["Subject"] = subject
+    msg["From"] = smtp["from"]
     msg["To"] = to_email
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_from, [to_email], msg.as_string())
+    try:
+        with smtplib.SMTP(smtp["host"], smtp["port"]) as server:
+            server.starttls()
+            server.login(smtp["user"], smtp["pass"])
+            server.sendmail(smtp["from"], [to_email], msg.as_string())
+        return {"sent": True, "provider": "smtp"}
+    except Exception as e:
+        return {"sent": False, "reason": "smtp_send_failed", "error": str(e)}
 
-    return {"sent": True, "reset_link": reset_link}
+
+def send_plain_email(to_email, subject, body):
+    to_email = clean_str(to_email)
+    if not to_email:
+        return {"sent": False, "reason": "missing_recipient"}
+
+    # Use Resend first (works on free hosts that block SMTP ports), then fallback to SMTP.
+    via_resend = send_plain_email_via_resend(to_email, subject, body)
+    if via_resend.get("sent"):
+        return via_resend
+
+    via_smtp = send_plain_email_via_smtp(to_email, subject, body)
+    if via_smtp.get("sent"):
+        return via_smtp
+
+    if via_resend.get("reason") == "resend_not_configured" and via_smtp.get("reason") == "smtp_not_configured":
+        return {"sent": False, "reason": "email_not_configured"}
+
+    return {"sent": False, "reason": "email_send_failed", "resend": via_resend, "smtp": via_smtp}
+
+
+def send_password_reset_email(to_email, token):
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    reset_link = f"{frontend_url}/reset-password?token={token}"
+    body = f"Use this link to reset your MGNITION password:\n\n{reset_link}\n\nThis link expires in 30 minutes."
+    delivery = send_plain_email(to_email, "MGNITION password reset", body)
+    if delivery.get("sent"):
+        return {"sent": True, "reset_link": reset_link}
+    # Keep dev fallback behavior for local testing when SMTP is absent.
+    if delivery.get("reason") in {"smtp_not_configured", "resend_not_configured", "email_not_configured"}:
+        return {"sent": False, "dev_token": token, "reset_link": reset_link}
+    delivery["reset_link"] = reset_link
+    return delivery
+
+
+def send_booking_accepted_email(booking_row):
+    to_email = clean_str((booking_row or {}).get("user_email"))
+    model = clean_str((booking_row or {}).get("model"))
+    variant = clean_str((booking_row or {}).get("variant"))
+    showroom_name = clean_str((booking_row or {}).get("showroom_name"))
+    showroom_address = clean_str((booking_row or {}).get("showroom_address"))
+    user_name = clean_str((booking_row or {}).get("user_name"))
+    created_at = clean_str((booking_row or {}).get("created_at"))
+    booking_reference = clean_str((booking_row or {}).get("booking_reference"))
+
+    line_reference = f"Booking ID: {booking_reference}\n" if booking_reference else ""
+    line_variant = f"Variant: {variant}\n" if variant else ""
+    line_address = f"Address: {showroom_address}\n" if showroom_address else ""
+    line_name = f"Hi {user_name},\n\n" if user_name else ""
+    body = (
+        f"{line_name}"
+        "Your MGNITION showroom booking has been approved.\n\n"
+        f"{line_reference}"
+        f"Model: {model or 'N/A'}\n"
+        f"{line_variant}"
+        f"Showroom: {showroom_name or 'N/A'}\n"
+        f"{line_address}"
+        f"Booked At: {created_at or 'N/A'}\n\n"
+        "Our team will contact you shortly. Thank you for using MGNITION."
+    )
+    return send_plain_email(to_email, "MGNITION booking confirmation", body)
 
 
 def load_variant_catalog():
@@ -759,45 +868,8 @@ def load_variant_catalog():
 BASE_VARIANTS = load_variant_catalog()
 
 
-def load_admin_variants():
-    rows = get_db().execute(
-        """
-        SELECT id, model, variant, year, price_thb, fuel_type, seats, body_type,
-               horsepower_hp, torque_nm, range_km, cargo_liters, image_url
-        FROM admin_models
-        WHERE active = 1
-        """
-    ).fetchall()
-    variants = []
-    for r in rows:
-        variants.append(
-            {
-                "variant_key": f"ADMIN|{r['id']}",
-                "model": clean_str(r["model"]),
-                "variant": clean_str(r["variant"]),
-                "year": clean_str(r["year"]),
-                "price_thb": safe_float(r["price_thb"], 0),
-                "starting_price": fmt_price(r["price_thb"]),
-                "fuel_type": clean_str(r["fuel_type"]),
-                "seats": int(safe_float(r["seats"], 0) or 0),
-                "body_type": clean_str(r["body_type"]),
-                "horsepower_hp": safe_float(r["horsepower_hp"], 0),
-                "torque_nm": safe_float(r["torque_nm"], 0),
-                "cargo_liters": safe_float(r["cargo_liters"], 0),
-                "length_mm": 0,
-                "width_mm": 0,
-                "height_mm": 0,
-                "wheelbase_mm": 0,
-                "range_km": safe_float(r["range_km"], 0),
-                "fuel_consumption_kml": 0,
-                "image_url": clean_str(r["image_url"]),
-            }
-        )
-    return variants
-
-
 def get_all_variants():
-    return BASE_VARIANTS + load_admin_variants()
+    return BASE_VARIANTS
 
 
 def variant_lookup():
@@ -824,6 +896,38 @@ def _is_ev_preference(v):
     return 0
 
 
+def _fuel_preference_label(v):
+    t = normalize_text(v)
+    if not t:
+        return ""
+    if ("ev" in t or "electric" in t) and ("hev" not in t and "hybrid" not in t):
+        return "ev"
+    if "hybrid" in t or "hev" in t or "phev" in t:
+        return "hybrid"
+    if "petrol" in t or "gasoline" in t or "diesel" in t or "gas" in t:
+        return "ice"
+    return ""
+
+
+def _fuel_specific_label(v):
+    t = normalize_text(v)
+    if not t:
+        return ""
+    has_diesel = "diesel" in t
+    has_petrol = "petrol" in t or "gasoline" in t
+    if has_diesel and has_petrol:
+        return ""
+    if "diesel" in t:
+        return "diesel"
+    if "petrol" in t or "gasoline" in t:
+        return "petrol"
+    if ("ev" in t or "electric" in t) and ("hev" not in t and "hybrid" not in t):
+        return "ev"
+    if "hybrid" in t or "hev" in t or "phev" in t:
+        return "hybrid"
+    return ""
+
+
 def map_answers_to_cosine_input(answers):
     budget_choice = clean_str(answers.get("budget_choice")) or clean_str(answers.get("budget"))
     seat_choice = clean_str(answers.get("seat_choice")) or clean_str(answers.get("seats"))
@@ -839,10 +943,15 @@ def map_answers_to_cosine_input(answers):
     else:
         fuel_type_ev = int(safe_float(fuel_type_ev_raw, 0) or 0)
 
+    fuel_pref = _fuel_preference_label(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+    fuel_choice = _fuel_specific_label(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+
     out = {
         "budget_choice": budget_choice,
         "seat_choice": seat_choice,
         "fuel_type_EV": fuel_type_ev,
+        "fuel_preference": fuel_pref,
+        "fuel_choice": fuel_choice,
         "occupation": occupation,
         "hobbies": hobbies,
         "usage": usage,
@@ -851,6 +960,8 @@ def map_answers_to_cosine_input(answers):
 
     if answers.get("max_price_thb") is not None:
         out["max_price_thb"] = safe_float(answers.get("max_price_thb"), None)
+    if answers.get("min_price_thb") is not None:
+        out["min_price_thb"] = safe_float(answers.get("min_price_thb"), None)
     if answers.get("min_seats") is not None:
         out["min_seats"] = int(safe_float(answers.get("min_seats"), 0) or 0)
     if answers.get("max_seats") is not None:
@@ -951,41 +1062,214 @@ COSINE_REASON_LABELS = {
 }
 
 
+def _is_ev_fuel(fuel_text):
+    t = normalize_text(fuel_text)
+    return ("ev" in t or "electric" in t) and ("hybrid" not in t and "hev" not in t and "phev" not in t)
+
+
+def _is_hybrid_fuel(fuel_text):
+    t = normalize_text(fuel_text)
+    return "hybrid" in t or "hev" in t or "phev" in t or "plug-in hybrid" in t
+
+
+def _is_ice_fuel(fuel_text):
+    t = normalize_text(fuel_text)
+    return "petrol" in t or "gasoline" in t or "gas" in t or "diesel" in t
+
+
+def _budget_matches_for_reason(price, answers):
+    p = safe_float(price, 0)
+    if p <= 0:
+        return False
+
+    min_price = answers.get("min_price_thb")
+    max_price = answers.get("max_price_thb")
+    min_price_val = safe_float(min_price, None) if min_price is not None else None
+    max_price_val = safe_float(max_price, None) if max_price is not None else None
+
+    if min_price_val is not None and p < min_price_val:
+        return False
+    if max_price_val is not None and p > max_price_val:
+        return False
+
+    budget_text = normalize_text(answers.get("budget_choice") or answers.get("budget"))
+    if not budget_text:
+        return min_price_val is not None or max_price_val is not None
+    if "below 700" in budget_text:
+        return p <= 700000
+    if "700,000" in budget_text and "999" in budget_text:
+        return 700000 <= p <= 999999
+    if "1,000,000" in budget_text:
+        return 1000000 <= p <= 1299999
+    if "1,300,000" in budget_text:
+        return p >= 1300000
+    return True
+
+
+def _seat_matches_for_reason(seats, answers):
+    s = int(safe_float(seats, 0) or 0)
+    if s <= 0:
+        return False
+    seat_choice = normalize_text(answers.get("seat_choice") or answers.get("seats"))
+    if not seat_choice:
+        return False
+    if "2" in seat_choice and "seat" in seat_choice:
+        return s == 2
+    if "3-5" in seat_choice:
+        return 3 <= s <= 5
+    if "5+" in seat_choice or "5" in seat_choice:
+        return s >= 5
+    return False
+
+
+def _distance_matches_for_reason(range_km, answers):
+    r = safe_float(range_km, 0)
+    if r <= 0:
+        return False
+    distance = normalize_text(answers.get("daily_distance") or answers.get("distance"))
+    if not distance:
+        return False
+    if "very long" in distance:
+        return r >= 500
+    if "long" in distance:
+        return r >= 420
+    if "medium" in distance:
+        return r >= 350
+    if "short" in distance:
+        return r >= 250
+    return False
+
+
+def _fuel_matches_for_reason(car_fuel, answers):
+    fuel_pref = normalize_text(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+    if not fuel_pref:
+        return False
+    car_fuel_text = normalize_text(car_fuel)
+    if ("diesel" in fuel_pref) and ("petrol" in fuel_pref or "gasoline" in fuel_pref):
+        return _is_ice_fuel(car_fuel_text)
+    if "diesel" in fuel_pref:
+        return "diesel" in car_fuel_text
+    if "petrol" in fuel_pref or "gasoline" in fuel_pref:
+        return "petrol" in car_fuel_text or "gasoline" in car_fuel_text or "gas" in car_fuel_text
+    if ("ev" in fuel_pref or "electric" in fuel_pref) and ("hybrid" not in fuel_pref and "hev" not in fuel_pref):
+        return _is_ev_fuel(car_fuel_text)
+    if "hybrid" in fuel_pref or "hev" in fuel_pref or "phev" in fuel_pref:
+        return _is_hybrid_fuel(car_fuel_text)
+    if "petrol/diesel" in fuel_pref or "ice" in fuel_pref:
+        return _is_ice_fuel(car_fuel_text)
+    return False
+
+
+def _body_usage_match_for_reason(key, car_row, answers):
+    usage_raw = answers.get("usage")
+    usage_text = normalize_text(" ".join(_as_list(usage_raw)) if isinstance(usage_raw, list) else usage_raw)
+    body_type = normalize_text(car_row.get("body_type"))
+    cargo = safe_float(car_row.get("cargo_liters"), 0)
+    hp = safe_float(car_row.get("horsepower_hp"), 0)
+    rng = safe_float(car_row.get("range_km"), 0)
+    fuel = normalize_text(car_row.get("fuel_type"))
+
+    if key == "cargo_weight":
+        return "cargo" in usage_text and cargo >= 400
+    if key == "efficiency_weight":
+        return "eco" in usage_text and (_is_ev_fuel(fuel) or _is_hybrid_fuel(fuel))
+    if key == "suv_pref":
+        is_suv_body = body_type in ("suv", "pickup", "mpv", "crossover")
+        return is_suv_body and ("cargo" in usage_text or "highway" in usage_text)
+    if key == "sedan_pref":
+        is_city_body = body_type in ("sedan", "hatchback", "wagon")
+        return is_city_body and "city" in usage_text
+    if key == "hp_weight":
+        occupation = normalize_text(answers.get("occupation"))
+        return hp >= 150 and (occupation in ("working professional", "business owner") or "highway" in usage_text)
+    if key == "torque_weight":
+        torque = safe_float(car_row.get("torque_nm"), 0)
+        return torque >= 220 and ("highway" in usage_text or "cargo" in usage_text)
+    return False
+
+
 def _cosine_reason_detail(key, car_row, answers):
-    price = fmt_price(car_row.get("price_thb"))
-    seats = int(safe_float(car_row.get("seats"), 0) or 0)
-    range_km = int(safe_float(car_row.get("range_km"), 0) or 0)
-    cargo = int(safe_float(car_row.get("cargo_liters"), 0) or 0)
-    hp = int(safe_float(car_row.get("horsepower_hp"), 0) or 0)
-    torque = int(safe_float(car_row.get("torque_nm"), 0) or 0)
+    budget_choice = clean_str(answers.get("budget_choice") or answers.get("budget"))
+    seat_choice = clean_str(answers.get("seat_choice") or answers.get("seats"))
+    distance_choice = clean_str(answers.get("daily_distance") or answers.get("distance"))
+    fuel_choice = clean_str(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
+    usage_raw = answers.get("usage")
+    if isinstance(usage_raw, list):
+        usage_choice = ", ".join([clean_str(x) for x in usage_raw if clean_str(x)])
+    else:
+        usage_choice = clean_str(usage_raw)
+    occupation_choice = clean_str(answers.get("occupation"))
+
     fuel_type = clean_str(car_row.get("fuel_type")) or "N/A"
     body_type = clean_str(car_row.get("body_type")) or "N/A"
+    price = safe_float(car_row.get("price_thb"), 0)
+    seats = int(safe_float(car_row.get("seats"), 0) or 0)
+    range_km = int(safe_float(car_row.get("range_km"), 0) or 0)
+    cargo_liters = int(safe_float(car_row.get("cargo_liters"), 0) or 0)
 
     if key == "price_weight":
-        return f"This price is in your budget ({price})."
+        if _budget_matches_for_reason(price, answers):
+            if budget_choice:
+                return f"This car fits the budget range you selected ({budget_choice}) with a starting price of {fmt_price(price)}."
+            return f"This car fits your budget preference with a starting price of {fmt_price(price)}."
+        return None
     if key == "seats_weight":
-        return f"This car has the seats you asked for ({seats} seats)."
+        if _seat_matches_for_reason(seats, answers):
+            if seat_choice:
+                return f"The seat capacity matches what you asked for ({seat_choice}) and this car has {seats} seats."
+            return f"The seat capacity matches your quiz preference with {seats} seats."
+        return None
     if key == "range_weight":
-        return f"The driving range matches your daily distance ({range_km} km)."
+        if _distance_matches_for_reason(range_km, answers):
+            if distance_choice:
+                return f"The driving range suits your daily travel pattern ({distance_choice}) with about {range_km} km range."
+            return f"The driving range suits your daily travel pattern with about {range_km} km range."
+        return None
     if key == "cargo_weight":
-        return f"The cargo space suits your usage ({cargo} L)."
+        if _body_usage_match_for_reason("cargo_weight", car_row, answers):
+            if usage_choice:
+                return f"The cargo space supports how you'll use the car ({usage_choice}) with around {cargo_liters} L."
+            return f"The cargo space supports your expected usage with around {cargo_liters} L."
+        return None
     if key == "hp_weight":
-        return f"The power level matches your driving preference ({hp} hp)."
+        if _body_usage_match_for_reason("hp_weight", car_row, answers):
+            hp = int(safe_float(car_row.get("horsepower_hp"), 0) or 0)
+            if occupation_choice:
+                return f"The performance level matches your driving profile ({occupation_choice}) with {hp} hp."
+            return f"The performance level matches your driving profile with {hp} hp."
+        return None
     if key == "torque_weight":
-        return f"Torque is suitable for your driving needs ({torque} Nm)."
-    if key == "fuel_ev_weight":
-        return f"You selected EV, and this car is {fuel_type}."
-    if key == "fuel_hev_weight":
-        return f"You selected hybrid, and this car is {fuel_type}."
-    if key == "fuel_ice_weight":
-        return f"You selected petrol/diesel, and this car is {fuel_type}."
+        if _body_usage_match_for_reason("torque_weight", car_row, answers):
+            torque = int(safe_float(car_row.get("torque_nm"), 0) or 0)
+            if usage_choice:
+                return f"The acceleration/torque feel matches your use case ({usage_choice}) with {torque} Nm."
+            return f"The acceleration/torque feel matches your use case with {torque} Nm."
+        return None
+    if key in ("fuel_ev_weight", "fuel_hev_weight", "fuel_ice_weight"):
+        if _fuel_matches_for_reason(fuel_type, answers):
+            if fuel_choice:
+                return f"The fuel type matches what you selected ({fuel_choice}) and this model is {fuel_type}."
+            return f"The fuel type matches your preference and this model is {fuel_type}."
+        return None
     if key == "efficiency_weight":
-        return "This car is fuel-efficient for your driving pattern."
+        if _body_usage_match_for_reason("efficiency_weight", car_row, answers):
+            if usage_choice:
+                return f"This model's efficiency fits your driving style ({usage_choice})."
+            return "This model's efficiency fits your driving style."
+        return None
     if key == "suv_pref":
-        return f"You prefer SUV-style driving, and this car is a {body_type}."
+        if _body_usage_match_for_reason("suv_pref", car_row, answers):
+            if usage_choice:
+                return f"The body style matches how you plan to drive ({usage_choice}) and this car is a {body_type}."
+            return f"The body style matches your preference and this car is a {body_type}."
+        return None
     if key == "sedan_pref":
-        return f"You prefer sedan/hatchback style, and this car is a {body_type}."
-    return "This feature strongly matches your quiz answers."
+        if _body_usage_match_for_reason("sedan_pref", car_row, answers):
+            if usage_choice:
+                return f"The body style matches how you plan to drive ({usage_choice}) and this car is a {body_type}."
+            return f"The body style matches your preference and this car is a {body_type}."
+        return None
+    return None
 
 
 def build_cosine_explanation(car_row, user_profile, final_score, answers=None):
@@ -998,9 +1282,16 @@ def build_cosine_explanation(car_row, user_profile, final_score, answers=None):
 
     ranked = [(k, v) for k, v in contributions if v > 0]
     factors = []
+    seen_details = set()
     for key, val in ranked:
         label = COSINE_REASON_LABELS.get(key, key)
         detail = _cosine_reason_detail(key, car_row, answers or {})
+        if not detail:
+            continue
+        normalized_detail = normalize_text(detail)
+        if normalized_detail in seen_details:
+            continue
+        seen_details.add(normalized_detail)
         factors.append(
             {
                 "key": key,
@@ -1096,29 +1387,38 @@ def build_template_reasons(answers, variant):
     seats = int(safe_float(variant.get("seats"), 0) or 0)
 
     budget_text = normalize_text(answers.get("budget_choice") or answers.get("budget"))
+    budget_label = clean_str(answers.get("budget_choice") or answers.get("budget"))
     max_price = answers.get("max_price_thb")
-    if max_price is not None:
-        max_price_val = safe_float(max_price, 0)
-        if price and price <= max_price_val:
-            reasons.append(f"Budget fit: {fmt_price(price)} is within your max price.")
+    min_price = answers.get("min_price_thb")
+    if max_price is not None or min_price is not None:
+        max_price_val = safe_float(max_price, None) if max_price is not None else None
+        min_price_val = safe_float(min_price, None) if min_price is not None else None
+        price_ok = bool(price)
+        if price_ok and max_price_val is not None:
+            price_ok = price <= max_price_val
+        if price_ok and min_price_val is not None:
+            price_ok = price >= min_price_val
+        if price_ok:
+            reasons.append(f"Budget fit: You selected ({budget_label or 'custom budget'}), and this car is {fmt_price(price)}.")
     elif budget_text:
         if "below 700" in budget_text and price and price <= 700000:
-            reasons.append(f"Budget fit: {fmt_price(price)} is within your range (below ฿700,000).")
+            reasons.append(f"Budget fit: You selected ({budget_label or 'Below 700,000 THB'}), and this car is {fmt_price(price)}.")
         elif "700,000" in budget_text and "999" in budget_text and 700000 <= price <= 999999:
-            reasons.append(f"Budget fit: {fmt_price(price)} matches your ฿700,000–฿999,999 range.")
+            reasons.append(f"Budget fit: You selected ({budget_label or '700,000 - 999,999 THB'}), and this car is {fmt_price(price)}.")
         elif "1,000,000" in budget_text and 1000000 <= price <= 1299999:
-            reasons.append(f"Budget fit: {fmt_price(price)} matches your ฿1,000,000–฿1,299,999 range.")
+            reasons.append(f"Budget fit: You selected ({budget_label or '1,000,000 - 1,299,999 THB'}), and this car is {fmt_price(price)}.")
         elif "1,300,000" in budget_text and price >= 1300000:
-            reasons.append(f"Budget fit: {fmt_price(price)} fits your premium budget range.")
+            reasons.append(f"Budget fit: You selected ({budget_label or '1,300,000 THB and above'}), and this car is {fmt_price(price)}.")
 
     seat_choice = normalize_text(answers.get("seat_choice") or answers.get("seats"))
+    seat_label = clean_str(answers.get("seat_choice") or answers.get("seats"))
     if seat_choice:
         if "2" in seat_choice and "seat" in seat_choice and seats == 2:
-            reasons.append(f"Seats: {seats} seats matches your preference.")
+            reasons.append(f"Seat fit: You selected ({seat_label or '2 seats'}), and this car has {seats} seats.")
         elif "3-5" in seat_choice and 3 <= seats <= 5:
-            reasons.append(f"Seats: {seats} seats matches your family use.")
+            reasons.append(f"Seat fit: You selected ({seat_label or '3-5 seats'}), and this car has {seats} seats.")
         elif ("5+" in seat_choice or "5" in seat_choice) and seats >= 5:
-            reasons.append(f"Seats: {seats} seats fits your group size.")
+            reasons.append(f"Seat fit: You selected ({seat_label or '5+ seats'}), and this car has {seats} seats.")
 
     fuel_pref = normalize_text(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
     if fuel_pref:
@@ -1129,13 +1429,23 @@ def build_template_reasons(answers, variant):
             fuel_match = True
         if fuel_match:
             label = clean_str(answers.get("fuelType") or answers.get("fuel_type") or answers.get("fuel"))
-            reasons.append(f"Fuel: {label} aligns with your eco preference.")
+            reasons.append(f"Fuel fit: You selected ({label or 'fuel preference'}), and this car is {variant.get('fuel_type') or 'compatible'}.")
 
     if len(reasons) < 3:
         distance = normalize_text(answers.get("daily_distance") or answers.get("distance"))
+        distance_label = clean_str(answers.get("daily_distance") or answers.get("distance"))
         range_km = int(safe_float(variant.get("range_km"), 0) or 0)
-        if distance and range_km:
-            reasons.append(f"Range: {range_km} km fits your daily distance.")
+        distance_ok = False
+        if "very long" in distance:
+            distance_ok = range_km >= 500
+        elif "long" in distance:
+            distance_ok = range_km >= 420
+        elif "medium" in distance:
+            distance_ok = range_km >= 350
+        elif "short" in distance:
+            distance_ok = range_km >= 250
+        if distance_ok and range_km:
+            reasons.append(f"Range fit: You selected ({distance_label or 'daily distance'}), and this model supports about {range_km} km.")
 
     if len(reasons) < 3:
         usage_val = answers.get("usage")
@@ -1145,9 +1455,9 @@ def build_template_reasons(answers, variant):
         cargo = int(safe_float(variant.get("cargo_liters"), 0) or 0)
         body = normalize_text(variant.get("body_type"))
         if "cargo" in usage and cargo >= 400:
-            reasons.append(f"Cargo: {cargo} L supports your practical use.")
+            reasons.append(f"Usage fit: You selected ({clean_str(usage_val)}), and cargo space is {cargo} L.")
         elif "city" in usage and body:
-            reasons.append(f"Body type: {variant.get('body_type')} suits city driving.")
+            reasons.append(f"Usage fit: You selected ({clean_str(usage_val)}), and this car body type is {variant.get('body_type')}.")
 
     if not reasons:
         reasons.append("Matched overall preferences from your quiz.")
@@ -1255,6 +1565,34 @@ MODEL_ARTIFACT = load_model_artifact()
 SURVEY_REG_ARTIFACT = load_survey_regression_artifact()
 
 
+def feedback_blend_weight(artifact):
+    if not artifact:
+        return 0.0
+    samples = int(safe_float(artifact.get("samples"), 0) or 0)
+    positives = int(safe_float(artifact.get("positives"), 0) or 0)
+    if samples < max(1, FEEDBACK_MIN_SAMPLES) or positives <= 0:
+        return 0.0
+
+    min_w = max(0.0, min(0.8, safe_float(FEEDBACK_BLEND_MIN, 0.18)))
+    max_w = max(min_w, min(0.9, safe_float(FEEDBACK_BLEND_MAX, 0.40)))
+    warmup = max(FEEDBACK_MIN_SAMPLES + 1, int(safe_float(FEEDBACK_BLEND_WARMUP_SAMPLES, 250) or 250))
+    progress = (samples - FEEDBACK_MIN_SAMPLES) / float(max(1, warmup - FEEDBACK_MIN_SAMPLES))
+    progress = max(0.0, min(1.0, progress))
+    return min_w + (max_w - min_w) * progress
+
+
+def predict_feedback_score(artifact, variant, answers, cosine_score=0.0):
+    if not artifact:
+        return None
+    try:
+        base_rule = max(0.0, min(12.0, float(safe_float(cosine_score, 0.0)) * 12.0))
+        feat = featurize(variant, answers, base_rule)
+        X = artifact["vectorizer"].transform([feat])
+        return float(artifact["model"].predict_proba(X)[0][1])
+    except Exception:
+        return None
+
+
 def train_from_feedback(min_samples=25):
     global MODEL_ARTIFACT
 
@@ -1287,19 +1625,30 @@ def train_from_feedback(min_samples=25):
 
     feedback_rows = db.execute(
         """
-        SELECT user_id, variant_key, event_type, created_at
+        SELECT user_id, variant_key, event_type, created_at, payload_json
         FROM user_feedback
-        WHERE event_type IN ('save', 'booking')
+        WHERE event_type IN ('save', 'booking', 'rating')
         """
     ).fetchall()
 
     feedback_map = {}
     for f in feedback_rows:
         key = (f["user_id"], f["variant_key"])
-        bucket = feedback_map.setdefault(key, {"save": [], "booking": []})
+        bucket = feedback_map.setdefault(key, {"save": [], "booking": [], "rating": []})
         ts = parse_iso(f["created_at"])
         if ts and f["event_type"] in bucket:
-            bucket[f["event_type"]].append(ts)
+            if f["event_type"] == "rating":
+                rating_val = None
+                try:
+                    payload = json.loads(f["payload_json"] or "{}")
+                    rating_raw = safe_float(payload.get("rating"), None) if isinstance(payload, dict) else None
+                    if rating_raw is not None:
+                        rating_val = max(1.0, min(5.0, float(rating_raw)))
+                except Exception:
+                    rating_val = None
+                bucket["rating"].append((ts, rating_val))
+            else:
+                bucket[f["event_type"]].append(ts)
 
     rows = []
     for r in rec_rows:
@@ -1324,24 +1673,6 @@ def train_from_feedback(min_samples=25):
         )
 
     variants = {v["variant_key"]: v for v in BASE_VARIANTS}
-    admin = db.execute(
-        "SELECT id, model, variant, year, price_thb, fuel_type, seats, body_type, horsepower_hp, torque_nm, range_km, cargo_liters, image_url FROM admin_models"
-    ).fetchall()
-    for a in admin:
-        variants[f"ADMIN|{a['id']}"] = {
-            "variant_key": f"ADMIN|{a['id']}",
-            "model": clean_str(a["model"]),
-            "variant": clean_str(a["variant"]),
-            "year": clean_str(a["year"]),
-            "price_thb": safe_float(a["price_thb"], 0),
-            "fuel_type": clean_str(a["fuel_type"]),
-            "seats": int(safe_float(a["seats"], 0) or 0),
-            "body_type": clean_str(a["body_type"]),
-            "horsepower_hp": safe_float(a["horsepower_hp"], 0),
-            "torque_nm": safe_float(a["torque_nm"], 0),
-            "range_km": safe_float(a["range_km"], 0),
-            "cargo_liters": safe_float(a["cargo_liters"], 0),
-        }
 
     xs = []
     ys = []
@@ -1353,12 +1684,37 @@ def train_from_feedback(min_samples=25):
         answers = json.loads(r["answers_json"] or "{}")
         xs.append(featurize(v, answers, r["rule_score"] or 0))
         served = parse_iso(r["served_at"])
-        fb = feedback_map.get((r["user_id"], r["variant_key"]), {"save": [], "booking": []})
+        fb = feedback_map.get((r["user_id"], r["variant_key"]), {"save": [], "booking": [], "rating": []})
         has_save = any(ts and served and ts >= served for ts in fb.get("save", []))
         has_booking = any(ts and served and ts >= served for ts in fb.get("booking", []))
-        label = 1 if (has_save or has_booking) else 0
+        ratings_after = [
+            rv
+            for ts, rv in fb.get("rating", [])
+            if ts and served and ts >= served and rv is not None
+        ]
+        avg_rating = (sum(ratings_after) / len(ratings_after)) if ratings_after else None
+        has_high_rating = any(rv >= 4.0 for rv in ratings_after)
+        has_low_rating = any(rv <= 2.0 for rv in ratings_after)
+
+        if has_booking or has_save or has_high_rating:
+            label = 1
+        elif has_low_rating:
+            label = 0
+        elif avg_rating is not None:
+            label = 1 if avg_rating >= 3.5 else 0
+        else:
+            label = 0
         ys.append(label)
-        ws.append(2.6 if has_booking else (1.4 if has_save else 1.0))
+        if has_booking:
+            sample_weight = 3.0
+        elif has_save:
+            sample_weight = 2.0
+        elif avg_rating is not None:
+            # Ratings closer to extremes carry more learning signal.
+            sample_weight = 1.0 + abs(avg_rating - 3.0) * 0.6
+        else:
+            sample_weight = 1.0
+        ws.append(sample_weight)
 
     if len(xs) < min_samples or len(set(ys)) < 2:
         db.close()
@@ -1472,6 +1828,20 @@ def user_payload(user_row):
     }
 
 
+def row_get(row, key, default=None):
+    if row is None:
+        return default
+    try:
+        if key in row.keys():
+            return row[key]
+    except Exception:
+        pass
+    try:
+        return row.get(key, default)
+    except Exception:
+        return default
+
+
 @app.get("/")
 def root():
     return jsonify(
@@ -1487,13 +1857,13 @@ def root():
                 "/saved-models",
                 "/bookings",
                 "/feedback/click",
+                "/feedback/rating",
                 "/recommend",
                 "/public/promotions",
-                "/public/admin-models",
+                "/public/car-of-the-month",
                 "/admin/analytics",
                 "/admin/bookings",
                 "/admin/promotions",
-                "/admin/models",
                 "/ml/status",
                 "/ml/retrain",
             ],
@@ -1656,11 +2026,53 @@ def me():
 @auth_required
 def update_profile():
     payload = request.get_json(silent=True) or {}
-    quiz_answers = payload.get("quiz_answers")
-    if not isinstance(quiz_answers, dict):
+    quiz_answers = payload.get("quiz_answers") if "quiz_answers" in payload else None
+    if quiz_answers is not None and not isinstance(quiz_answers, dict):
         return jsonify({"error": "quiz_answers must be an object."}), 400
-    upsert_profile(g.current_user["id"], quiz_answers)
-    return jsonify({"message": "Profile updated.", "profile": get_profile(g.current_user["id"])})
+
+    editable_fields = {key for key in ("full_name", "email", "phone") if key in payload}
+    if quiz_answers is None and not editable_fields:
+        return jsonify({"error": "No profile updates provided."}), 400
+
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (g.current_user["id"],)).fetchone()
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    next_full_name = clean_str(payload.get("full_name")) if "full_name" in payload else clean_str(user["full_name"])
+    next_email = clean_str(payload.get("email")).lower() if "email" in payload else clean_str(user["email"]).lower()
+    next_phone = clean_str(payload.get("phone")) if "phone" in payload else clean_str(user["phone"])
+
+    if not next_full_name:
+        return jsonify({"error": "Full name is required."}), 400
+    if not next_email or "@" not in next_email:
+        return jsonify({"error": "Please provide a valid email address."}), 400
+
+    existing_email = db.execute("SELECT id FROM users WHERE email = ? AND id <> ?", (next_email, user["id"])).fetchone()
+    if existing_email:
+        return jsonify({"error": "Email already registered."}), 409
+
+    db.execute(
+        "UPDATE users SET full_name = ?, email = ?, phone = ? WHERE id = ?",
+        (next_full_name, next_email, next_phone, user["id"]),
+    )
+    db.execute(
+        "UPDATE bookings SET user_name = ?, user_email = ?, user_phone = ? WHERE user_id = ?",
+        (next_full_name, next_email, next_phone, user["id"]),
+    )
+    db.commit()
+
+    if quiz_answers is not None:
+        upsert_profile(user["id"], quiz_answers)
+
+    updated_user = db.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+    return jsonify(
+        {
+            "message": "Profile updated.",
+            "user": user_payload(updated_user),
+            "profile": get_profile(user["id"]),
+        }
+    )
 
 
 @app.get("/saved-models")
@@ -1741,6 +2153,29 @@ def feedback_click():
     return jsonify({"message": "Click feedback logged."})
 
 
+@app.post("/feedback/rating")
+@auth_required
+def feedback_rating():
+    payload = request.get_json(silent=True) or {}
+    vk = clean_str(payload.get("variant_key"))
+    model = clean_str(payload.get("model"))
+    if not vk:
+        vk = variant_key_from_values(model, payload.get("variant"), payload.get("year"))
+    if not vk:
+        return jsonify({"error": "variant_key or model is required."}), 400
+
+    rating = safe_float(payload.get("rating"), None)
+    if rating is None:
+        return jsonify({"error": "rating is required."}), 400
+    rating = max(1.0, min(5.0, float(rating)))
+
+    event_payload = dict(payload)
+    event_payload["rating"] = rating
+    insert_feedback(g.current_user["id"], vk, "rating", event_payload)
+    train_from_feedback(min_samples=20)
+    return jsonify({"message": "Rating feedback logged.", "rating": rating})
+
+
 @app.post("/impressions")
 def capture_impressions():
     payload = request.get_json(silent=True) or {}
@@ -1773,17 +2208,19 @@ def create_booking():
         return jsonify({"error": "showroom_name and model are required."}), 400
 
     db = get_db()
+    booking_reference = generate_booking_reference(db)
     db.execute(
         """
         INSERT INTO bookings
-        (user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address, province, model, variant, variant_key, notes, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        (booking_reference, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address, province, model, variant, variant_key, notes, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         """,
         (
+            booking_reference,
             g.current_user["id"],
-            clean_str(payload.get("user_name")) or clean_str(g.current_user.get("full_name")),
-            clean_str(payload.get("user_email")) or clean_str(g.current_user.get("email")),
-            clean_str(payload.get("user_phone")) or clean_str(g.current_user.get("phone")),
+            clean_str(payload.get("user_name")) or clean_str(row_get(g.current_user, "full_name")),
+            clean_str(payload.get("user_email")) or clean_str(row_get(g.current_user, "email")),
+            clean_str(payload.get("user_phone")) or clean_str(row_get(g.current_user, "phone")),
             clean_str(payload.get("showroom_id")),
             showroom_name,
             clean_str(payload.get("showroom_address")),
@@ -1796,6 +2233,15 @@ def create_booking():
         ),
     )
     db.commit()
+    booking_row = db.execute(
+        """
+        SELECT id, booking_reference, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
+               province, model, variant, variant_key, notes, status, created_at
+        FROM bookings
+        WHERE booking_reference = ?
+        """,
+        (booking_reference,),
+    ).fetchone()
 
     variant_key_value = clean_str(payload.get("variant_key"))
     if not variant_key_value:
@@ -1814,7 +2260,7 @@ def create_booking():
         )
         train_from_feedback(min_samples=20)
 
-    return jsonify({"message": "Booking created successfully."}), 201
+    return jsonify({"message": "Booking created successfully.", "booking": dict(booking_row) if booking_row else None}), 201
 
 
 @app.post("/recommend")
@@ -1845,38 +2291,200 @@ def recommend():
 
     top = []
     car_df = pd.DataFrame(get_all_variants())
-    cosine_input = map_answers_to_cosine_input(answers)
-    ranked_df, user_profile, _feature_cols, msg = score_cars_with_cosine(car_df, cosine_input, debug=False)
+    base_cosine_input = apply_choice_conversions(map_answers_to_cosine_input(answers))
+    relaxation_level = "strict"
+    fallback_notice = ""
+    target_top_k = 3
 
-    if msg:
-        return jsonify({"recommendations": [], "message": msg, "engine": "cosine_similarity"})
+    def _min_required_range_km(distance_choice):
+        d = normalize_text(distance_choice)
+        if "very long" in d or "150+" in d:
+            return 500
+        if "long" in d:
+            return 420
+        if "medium" in d or "30-80" in d:
+            return 350
+        if "short" in d:
+            return 250
+        return 0
+
+    def _seat_floor(choice_text):
+        s = normalize_text(choice_text)
+        if "5+" in s:
+            return 5
+        if "3-5" in s:
+            return 3
+        if "2" in s and "seat" in s:
+            return 2
+        return 0
+
+    requested_seat_choice = clean_str(base_cosine_input.get("seat_choice"))
+    seat_floor = _seat_floor(requested_seat_choice)
+    min_required_range_km = _min_required_range_km(base_cosine_input.get("daily_distance"))
+
+    def _apply_capability_floors(df):
+        out = df.copy()
+        if out.empty:
+            return out
+        if min_required_range_km > 0 and "range_km" in out.columns:
+            ranges = pd.to_numeric(out["range_km"], errors="coerce")
+            out = out.loc[ranges >= float(min_required_range_km)]
+        if seat_floor > 0 and "seats" in out.columns:
+            seats = pd.to_numeric(out["seats"], errors="coerce")
+            out = out.loc[seats >= int(seat_floor)]
+        return out
+
+    def _relax_seats_keep_floor(x):
+        out = dict(x)
+        out["seat_choice"] = ""
+        if seat_floor > 0:
+            out["min_seats"] = int(seat_floor)
+            out["max_seats"] = None
+        else:
+            out["min_seats"] = None
+            out["max_seats"] = None
+        return out
+
+    def _relax_fuel(x):
+        out = dict(x)
+        out["fuel_choice"] = ""
+        out["fuel_preference"] = ""
+        out["fuel_type_EV"] = 0
+        return out
+
+    ordered_relaxations = [
+        (
+            "strict",
+            "",
+            lambda x: dict(x),
+        ),
+        (
+            "relaxed_body_usage",
+            "No exact top matches for selected body/usage profile. Showing closest cars in your budget.",
+            lambda x: {
+                **x,
+                "hobbies": [],
+                "usage": [],
+            },
+        ),
+        (
+            "relaxed_distance_range",
+            "No exact top matches for selected distance/range profile. Showing closest cars in your budget while keeping minimum capability.",
+            lambda x: {
+                **x,
+                "daily_distance": "",
+            },
+        ),
+        (
+            "relaxed_seat",
+            "No exact top matches for selected seats. Showing cars with equal or higher seat capability in your budget.",
+            _relax_seats_keep_floor,
+        ),
+        (
+            "relaxed_fuel",
+            "No exact top matches for selected fuel. Showing closest cars in your budget with equal or higher capability.",
+            lambda x: _relax_fuel(_relax_seats_keep_floor(x)),
+        ),
+    ]
+
+    selected_rows = []
+    seen_variant_keys = set()
+    user_profile = {}
+
+    for stage_index, (level, note, transform) in enumerate(ordered_relaxations):
+        trial_input = apply_choice_conversions(transform(dict(base_cosine_input)))
+        trial_df, trial_profile, _trial_cols, trial_msg = score_cars_with_cosine(
+            car_df,
+            trial_input,
+            debug=False,
+        )
+        if trial_msg or trial_df.empty:
+            continue
+
+        trial_df = _apply_capability_floors(trial_df)
+        if trial_df.empty:
+            continue
+
+        trial_df = trial_df.sort_values("similarity_score", ascending=False)
+        added_here = 0
+        for _, row in trial_df.iterrows():
+            row_dict = row.to_dict()
+            variant_key = clean_str(row_dict.get("variant_key"))
+            if not variant_key:
+                variant_key = f"{clean_str(row_dict.get('model'))}|{clean_str(row_dict.get('variant'))}"
+            if variant_key in seen_variant_keys:
+                continue
+            seen_variant_keys.add(variant_key)
+            row_dict["relax_stage"] = stage_index
+            row_dict["relax_level"] = level
+            selected_rows.append(row_dict)
+            added_here += 1
+            if len(selected_rows) >= target_top_k:
+                break
+
+        if added_here > 0:
+            user_profile = trial_profile or user_profile
+            relaxation_level = level
+            if level != "strict":
+                fallback_notice = note
+
+        if len(selected_rows) >= target_top_k:
+            break
+
+    if not selected_rows:
+        return (
+            jsonify(
+                {
+                    "recommendations": [],
+                    "engine": "cosine_similarity",
+                    "message": "No cars match your budget and minimum capability requirements. Try expanding budget or reducing required range/seats.",
+                }
+            ),
+            200,
+        )
+
+    ranked_df = pd.DataFrame(selected_rows)
 
     reg_probs = survey_regression_probs(answers)
-    blend_w = max(0.0, min(0.5, SURVEY_REG_BLEND_WEIGHT))
-    if reg_probs:
-        reg_scores = []
-        final_scores = []
-        for _, row in ranked_df.iterrows():
-            r = row.to_dict()
-            cls = canonical_survey_choice_for_car(r)
-            cosine_score = float(safe_float(r.get("similarity_score"), 0))
-            reg_score = float(reg_probs.get(cls, 0.0)) if cls else 0.0
-            if cls:
-                final_score = (1.0 - blend_w) * cosine_score + blend_w * reg_score
-            else:
-                # Keep unseen/non-survey cars neutral rather than penalizing them.
-                final_score = cosine_score
-            reg_scores.append(reg_score)
-            final_scores.append(final_score)
-        ranked_df = ranked_df.copy()
-        ranked_df["regression_score"] = reg_scores
-        ranked_df["final_score"] = final_scores
-        ranked_df = ranked_df.sort_values("final_score", ascending=False).head(6)
+    reg_enabled = bool(reg_probs)
+    # Keep regression as a small refinement layer only.
+    blend_w = max(0.0, min(0.25, SURVEY_REG_BLEND_WEIGHT))
+    ranked_df = ranked_df.copy()
+
+    reg_scores = []
+    survey_masks = []
+    final_scores = []
+    for _, row in ranked_df.iterrows():
+        r = row.to_dict()
+        cosine_score = float(safe_float(r.get("similarity_score"), 0))
+        cls = canonical_survey_choice_for_car(r)
+        reg_score = float(reg_probs.get(cls, 0.0)) if (reg_enabled and cls) else 0.0
+        has_survey = bool(reg_enabled and cls)
+
+        # Survey model only participates for covered classes; others stay neutral.
+        if has_survey:
+            w_cos = 1.0 - blend_w
+            w_reg = blend_w
+            denom = max(1e-9, w_cos + w_reg)
+            final_score = (w_cos * cosine_score + w_reg * reg_score) / denom
+        else:
+            final_score = cosine_score
+
+        reg_scores.append(reg_score)
+        survey_masks.append(1 if has_survey else 0)
+        final_scores.append(final_score)
+
+    ranked_df["regression_score"] = reg_scores
+    ranked_df["survey_mask"] = survey_masks
+    ranked_df["feedback_score"] = 0.0
+    ranked_df["final_score"] = final_scores
+    feedback_enabled = False
+    feedback_w = 0.0
+
+    if "relax_stage" in ranked_df.columns:
+        ranked_df = ranked_df.sort_values(["relax_stage", "final_score"], ascending=[True, False]).head(target_top_k)
     else:
-        ranked_df = ranked_df.copy()
-        ranked_df["regression_score"] = 0.0
-        ranked_df["final_score"] = ranked_df["similarity_score"]
-        ranked_df = ranked_df.sort_values("final_score", ascending=False).head(6)
+        ranked_df = ranked_df.sort_values("final_score", ascending=False).head(target_top_k)
 
     def _safe_text(v):
         if v is None:
@@ -1890,8 +2498,12 @@ def recommend():
         r = row.to_dict()
         cosine_score = round(float(safe_float(r.get("similarity_score"), 0)), 6)
         reg_score = round(float(safe_float(r.get("regression_score"), 0)), 6)
+        feedback_score = round(float(safe_float(r.get("feedback_score"), 0)), 6)
         score = round(float(safe_float(r.get("final_score"), cosine_score)), 6)
         explanation = build_cosine_explanation(r, user_profile, score, answers)
+        reason_tokens = ["hard constraints", "cosine similarity"]
+        if reg_enabled and int(safe_float(r.get("survey_mask"), 0) or 0) == 1 and blend_w > 0:
+            reason_tokens.append("low-weight survey regression rerank")
         top.append(
             {
                 "variant_key": clean_str(r.get("variant_key")),
@@ -1909,12 +2521,13 @@ def recommend():
                 "image_url": _safe_text(r.get("image_url")),
                 "color_images": r.get("color_images") if isinstance(r.get("color_images"), dict) else {},
                 "default_color": _safe_text(r.get("default_color")),
-                "rule_score": None,
-                "ml_score": None,
+                "rule_score": cosine_score,
+                "ml_score": reg_score if (reg_enabled and int(safe_float(r.get("survey_mask"), 0) or 0) == 1) else None,
                 "score": score,
                 "cosine_score": cosine_score,
                 "regression_score": reg_score,
-                "reason": "Cosine similarity + survey regression + hard constraints",
+                "feedback_score": 0.0,
+                "reason": " + ".join(reason_tokens),
                 "explanation": explanation,
                 "rule_breakdown": {f["key"]: f["points"] for f in explanation.get("factors", [])},
             }
@@ -1944,7 +2557,8 @@ def recommend():
                 "score": r["score"],
                 "cosine_score": r.get("cosine_score", r["score"]),
                 "regression_score": r.get("regression_score", 0),
-                "reason": r.get("reason") or "Cosine similarity + survey regression + hard constraints",
+                "feedback_score": r.get("feedback_score", 0),
+                "reason": r.get("reason") or "Cosine similarity + hard constraints",
                 "explanation": r.get("explanation", {}),
                 "rule_breakdown": r.get("rule_breakdown", {}),
             }
@@ -1953,8 +2567,14 @@ def recommend():
     payload = {
         "recommendations": out,
         "engine": "cosine_similarity",
-        "regression_enabled": bool(reg_probs),
+        "regression_enabled": reg_enabled,
+        "feedback_enabled": False,
+        "survey_weight": round(blend_w, 4),
+        "feedback_weight": 0.0,
+        "relaxation_level": relaxation_level,
     }
+    if fallback_notice:
+        payload["message"] = fallback_notice
     return jsonify(payload)
 
 
@@ -1971,40 +2591,6 @@ def public_promotions():
     return jsonify({"promotions": [dict(r) for r in rows]})
 
 
-@app.get("/public/admin-models")
-def public_admin_models():
-    rows = get_db().execute(
-        """
-        SELECT id, model, variant, year, price_thb, fuel_type, seats, body_type,
-               horsepower_hp, torque_nm, range_km, cargo_liters, image_url
-        FROM admin_models
-        WHERE active = 1
-        ORDER BY id DESC
-        """
-    ).fetchall()
-    models = []
-    for r in rows:
-        models.append(
-            {
-                "variant_key": f"ADMIN|{r['id']}",
-                "model": r["model"],
-                "variant": r["variant"],
-                "year": r["year"],
-                "price": fmt_price(r["price_thb"]),
-                "starting_price": fmt_price(r["price_thb"]),
-                "fuel": r["fuel_type"],
-                "seats": str(r["seats"] or ""),
-                "bodyType": r["body_type"],
-                "horsepower_hp": r["horsepower_hp"],
-                "torque_nm": r["torque_nm"],
-                "range_km": r["range_km"],
-                "cargo_liters": r["cargo_liters"],
-                "imagePageUrl": r["image_url"],
-            }
-        )
-    return jsonify({"models": models})
-
-
 @app.get("/public/best-sellers")
 def public_best_sellers():
     rows = get_db().execute(
@@ -2018,10 +2604,96 @@ def public_best_sellers():
     return jsonify({"best_sellers": [dict(r) for r in rows]})
 
 
+@app.get("/public/car-of-the-month")
+def public_car_of_the_month():
+    now = utc_now()
+    period = f"{now.year:04d}-{now.month:02d}"
+
+    rows = get_db().execute(
+        """
+        SELECT variant_key, model, variant, year, created_at
+        FROM saved_variants
+        """
+    ).fetchall()
+
+    if not rows:
+        return jsonify({"scope": "monthly", "period": period, "cars": []})
+
+    month_counts = {}
+    all_counts = {}
+    row_meta = {}
+
+    for r in rows:
+        vk = clean_str(r["variant_key"]) or variant_key_from_values(r["model"], r["variant"], r["year"])
+        if not vk:
+            continue
+        all_counts[vk] = all_counts.get(vk, 0) + 1
+        if vk not in row_meta:
+            row_meta[vk] = {
+                "model": clean_str(r["model"]),
+                "variant": clean_str(r["variant"]),
+                "year": clean_str(r["year"]),
+            }
+        ts = parse_iso(r["created_at"])
+        if ts and ts.year == now.year and ts.month == now.month:
+            month_counts[vk] = month_counts.get(vk, 0) + 1
+
+    counts = month_counts if month_counts else all_counts
+    scope = "monthly" if month_counts else "all_time"
+    vmap = variant_lookup()
+
+    top_rows = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:1]
+    cars = []
+    for vk, cnt in top_rows:
+        v = vmap.get(vk, {})
+        meta = row_meta.get(vk, {})
+        price_thb = safe_float(v.get("price_thb"), 0)
+        price_label = fmt_price(price_thb) if price_thb else ""
+        cars.append(
+            {
+                "variant_key": vk,
+                "model": clean_str(v.get("model")) or meta.get("model", ""),
+                "variant": clean_str(v.get("variant")) or meta.get("variant", ""),
+                "year": clean_str(v.get("year")) or meta.get("year", ""),
+                "price": price_label,
+                "starting_price": price_label,
+                "fuel": clean_str(v.get("fuel_type")),
+                "seats": str(v.get("seats") or ""),
+                "bodyType": clean_str(v.get("body_type")),
+                "imagePageUrl": clean_str(v.get("image_url")),
+                "save_count": int(cnt),
+            }
+        )
+
+    return jsonify({"scope": scope, "period": period, "cars": cars})
+
+
 @app.get("/admin/analytics")
 @admin_required
 def admin_analytics():
     db = get_db()
+    start_date_raw = clean_str(request.args.get("start_date"))
+    end_date_raw = clean_str(request.args.get("end_date"))
+    granularity = clean_str(request.args.get("granularity")).lower() or "day"
+    if granularity not in {"day", "week", "month"}:
+        granularity = "day"
+    try:
+        top_n = int(request.args.get("top_n") or 5)
+    except Exception:
+        top_n = 5
+    top_n = max(1, min(top_n, 10))
+
+    def parse_ymd(raw):
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    start_dt = parse_ymd(start_date_raw)
+    end_dt_inclusive = parse_ymd(end_date_raw)
+    end_dt = end_dt_inclusive + timedelta(days=1) if end_dt_inclusive else None
 
     top_clicks = db.execute(
         """
@@ -2029,36 +2701,6 @@ def admin_analytics():
         FROM user_feedback
         WHERE event_type = 'click'
         GROUP BY variant_key
-        ORDER BY cnt DESC
-        LIMIT 10
-        """
-    ).fetchall()
-
-    top_saves = db.execute(
-        """
-        SELECT variant_key, COUNT(*) AS cnt
-        FROM user_feedback
-        WHERE event_type = 'save'
-        GROUP BY variant_key
-        ORDER BY cnt DESC
-        LIMIT 10
-        """
-    ).fetchall()
-
-    top_bookings = db.execute(
-        """
-        SELECT
-            CASE
-              WHEN COALESCE(variant_key, '') = '' THEN COALESCE(model, 'Unknown')
-              ELSE variant_key
-            END AS variant_key,
-            COUNT(*) AS cnt
-        FROM bookings
-        GROUP BY
-            CASE
-              WHEN COALESCE(variant_key, '') = '' THEN COALESCE(model, 'Unknown')
-              ELSE variant_key
-            END
         ORDER BY cnt DESC
         LIMIT 10
         """
@@ -2121,6 +2763,120 @@ def admin_analytics():
 
     conv.sort(key=lambda x: x["conversion_rate"], reverse=True)
 
+    def in_selected_range(ts):
+        if not ts:
+            return False
+        if start_dt and ts < start_dt:
+            return False
+        if end_dt and ts >= end_dt:
+            return False
+        return True
+
+    filtered_saves = []
+    save_counts_by_variant = {}
+    for s in saves:
+        ts = parse_iso(s["created_at"])
+        if not in_selected_range(ts):
+            continue
+        vk = clean_str(s["variant_key"])
+        if not vk:
+            continue
+        filtered_saves.append((ts, vk))
+        save_counts_by_variant[vk] = save_counts_by_variant.get(vk, 0) + 1
+
+    top_saved_pairs = sorted(save_counts_by_variant.items(), key=lambda x: (-x[1], x[0]))[:10]
+    top_saves = [{"variant_key": vk, "cnt": cnt} for vk, cnt in top_saved_pairs]
+
+    top_series_variants = [vk for vk, _ in sorted(save_counts_by_variant.items(), key=lambda x: (-x[1], x[0]))[:top_n]]
+
+    bookings_rows = db.execute("SELECT variant_key, model, created_at FROM bookings").fetchall()
+    filtered_bookings = []
+    booking_counts_by_variant = {}
+    for b in bookings_rows:
+        ts = parse_iso(b["created_at"])
+        if not in_selected_range(ts):
+            continue
+        vk = clean_str(b["variant_key"]) or clean_str(b["model"]) or "Unknown"
+        filtered_bookings.append((ts, vk))
+        booking_counts_by_variant[vk] = booking_counts_by_variant.get(vk, 0) + 1
+
+    top_booking_pairs = sorted(booking_counts_by_variant.items(), key=lambda x: (-x[1], x[0]))[:10]
+    top_bookings = [{"variant_key": vk, "cnt": cnt} for vk, cnt in top_booking_pairs]
+    top_booking_series_variants = [vk for vk, _ in sorted(booking_counts_by_variant.items(), key=lambda x: (-x[1], x[0]))[:top_n]]
+
+    def bucket_key(ts):
+        if granularity == "week":
+            week_start = (ts - timedelta(days=ts.weekday())).date()
+            return week_start.isoformat()
+        if granularity == "month":
+            return f"{ts.year:04d}-{ts.month:02d}-01"
+        return ts.date().isoformat()
+
+    bucket_counts = {}
+    for ts, vk in filtered_saves:
+        bk = bucket_key(ts)
+        if bk not in bucket_counts:
+            bucket_counts[bk] = {}
+        bucket_counts[bk][vk] = bucket_counts[bk].get(vk, 0) + 1
+
+    def month_start(dt):
+        return datetime(dt.year, dt.month, 1)
+
+    def next_month(dt):
+        if dt.month == 12:
+            return datetime(dt.year + 1, 1, 1)
+        return datetime(dt.year, dt.month + 1, 1)
+
+    selected_buckets = sorted(bucket_counts.keys())
+    if start_dt and end_dt:
+        if granularity == "month":
+            cursor = month_start(start_dt)
+            limit = end_dt
+            selected_buckets = []
+            while cursor < limit:
+                selected_buckets.append(cursor.date().isoformat())
+                cursor = next_month(cursor)
+        elif granularity == "week":
+            cursor = start_dt - timedelta(days=start_dt.weekday())
+            limit = end_dt
+            selected_buckets = []
+            while cursor < limit:
+                selected_buckets.append(cursor.date().isoformat())
+                cursor = cursor + timedelta(days=7)
+        else:
+            cursor = start_dt
+            limit = end_dt
+            selected_buckets = []
+            while cursor < limit:
+                selected_buckets.append(cursor.date().isoformat())
+                cursor = cursor + timedelta(days=1)
+
+    series = []
+    for vk in top_series_variants:
+        series.append(
+            {
+                "variant_key": vk,
+                "counts": [int(bucket_counts.get(bk, {}).get(vk, 0)) for bk in selected_buckets],
+            }
+        )
+
+    booked_bucket_counts = {}
+    for ts, vk in filtered_bookings:
+        bk = bucket_key(ts)
+        if bk not in booked_bucket_counts:
+            booked_bucket_counts[bk] = {}
+        booked_bucket_counts[bk][vk] = booked_bucket_counts[bk].get(vk, 0) + 1
+
+    booked_selected_buckets = selected_buckets if selected_buckets else sorted(booked_bucket_counts.keys())
+    booked_series = []
+    for vk in top_booking_series_variants:
+        booked_series.append(
+            {
+                "variant_key": vk,
+                "counts": [int(booked_bucket_counts.get(bk, {}).get(vk, 0)) for bk in booked_selected_buckets],
+            }
+        )
+
     imp_counts = {}
     save_counts = {}
 
@@ -2157,10 +2913,26 @@ def admin_analytics():
     return jsonify(
         {
             "top_clicked_variants": [dict(r) for r in top_clicks],
-            "top_saved_variants": [dict(r) for r in top_saves],
-            "top_booked_variants": [dict(r) for r in top_bookings],
+            "top_saved_variants": top_saves,
+            "top_booked_variants": top_bookings,
             "conversion_by_quiz_segment": conv[:20],
             "impressions_saves_trend": trend,
+            "saved_variants_timeseries": {
+                "granularity": granularity,
+                "buckets": selected_buckets,
+                "series": series,
+            },
+            "booked_cars_timeseries": {
+                "granularity": granularity,
+                "buckets": booked_selected_buckets,
+                "series": booked_series,
+            },
+            "filters": {
+                "start_date": start_date_raw or None,
+                "end_date": end_date_raw or None,
+                "top_n": top_n,
+                "granularity": granularity,
+            },
         }
     )
 
@@ -2170,7 +2942,7 @@ def admin_analytics():
 def admin_bookings():
     rows = get_db().execute(
         """
-        SELECT id, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
+        SELECT id, booking_reference, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
                province, model, variant, variant_key, notes, status, created_at
         FROM bookings
         ORDER BY created_at DESC
@@ -2188,12 +2960,27 @@ def update_booking_status(booking_id):
     allowed = {"pending", "accepted", "rejected"}
     if status not in allowed:
         return jsonify({"error": "Invalid status."}), 400
+
     db = get_db()
+    existing = db.execute(
+        """
+        SELECT id, booking_reference, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
+               province, model, variant, variant_key, notes, status, created_at
+        FROM bookings
+        WHERE id = ?
+        """,
+        (booking_id,),
+    ).fetchone()
+    if not existing:
+        return jsonify({"error": "Booking not found."}), 404
+
+    old_status = clean_str(existing["status"]).lower()
     db.execute("UPDATE bookings SET status = ? WHERE id = ?", (status, booking_id))
     db.commit()
+
     row = db.execute(
         """
-        SELECT id, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
+        SELECT id, booking_reference, user_id, user_name, user_email, user_phone, showroom_id, showroom_name, showroom_address,
                province, model, variant, variant_key, notes, status, created_at
         FROM bookings
         WHERE id = ?
@@ -2202,7 +2989,17 @@ def update_booking_status(booking_id):
     ).fetchone()
     if not row:
         return jsonify({"error": "Booking not found."}), 404
-    return jsonify({"message": "Booking updated.", "booking": dict(row)})
+
+    email_delivery = None
+    if status == "accepted" and old_status != "accepted":
+        email_delivery = send_booking_accepted_email(dict(row))
+
+    response = {"message": "Booking updated.", "booking": dict(row)}
+    if email_delivery is not None:
+        response["booking_confirmation_email"] = email_delivery
+        if not email_delivery.get("sent"):
+            response["message"] = "Booking updated, but confirmation email was not sent."
+    return jsonify(response)
 
 
 @app.get("/admin/users")
@@ -2369,43 +3166,6 @@ def admin_update_promotion(promo_id):
     db.execute("UPDATE promotions SET active = ? WHERE id = ?", (active, promo_id))
     db.commit()
     return jsonify({"message": "Promotion updated.", "active": active})
-
-
-@app.post("/admin/models")
-@admin_required
-def admin_add_model():
-    payload = request.get_json(silent=True) or {}
-    model = clean_str(payload.get("model"))
-    if not model:
-        return jsonify({"error": "model is required."}), 400
-
-    db = get_db()
-    db.execute(
-        """
-        INSERT INTO admin_models
-        (model, variant, year, price_thb, fuel_type, seats, body_type, horsepower_hp, torque_nm, range_km, cargo_liters, image_url, active, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-        """,
-        (
-            model,
-            clean_str(payload.get("variant")),
-            clean_str(payload.get("year")),
-            safe_float(payload.get("price_thb"), 0),
-            clean_str(payload.get("fuel_type")),
-            int(safe_float(payload.get("seats"), 0) or 0),
-            clean_str(payload.get("body_type")),
-            safe_float(payload.get("horsepower_hp"), 0),
-            safe_float(payload.get("torque_nm"), 0),
-            safe_float(payload.get("range_km"), 0),
-            safe_float(payload.get("cargo_liters"), 0),
-            clean_str(payload.get("image_url")),
-            g.current_user["id"],
-            utc_now_iso(),
-            utc_now_iso(),
-        ),
-    )
-    db.commit()
-    return jsonify({"message": "Model added."}), 201
 
 
 @app.get("/ml/status")

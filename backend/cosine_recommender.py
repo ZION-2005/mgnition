@@ -15,11 +15,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Mapping dictionaries
 # -----------------------------
 
-BUDGET_MAP: Dict[str, Optional[float]] = {
-    "Below 700,000 THB": 700_000,
-    "700,000 - 999,999 THB": 999_999,
-    "1,000,000 - 1,299,999 THB": 1_299_999,
-    "1,300,000 THB and above": None,
+BUDGET_RANGE_MAP: Dict[str, Dict[str, Optional[float]]] = {
+    "Below 700,000 THB": {"min_price_thb": None, "max_price_thb": 700_000},
+    "700,000 - 999,999 THB": {"min_price_thb": 700_000, "max_price_thb": 999_999},
+    "1,000,000 - 1,299,999 THB": {"min_price_thb": 1_000_000, "max_price_thb": 1_299_999},
+    "1,300,000 THB and above": {"min_price_thb": 1_300_000, "max_price_thb": None},
 }
 
 SEATS_MAP: Dict[str, Dict[str, Optional[int]]] = {
@@ -175,6 +175,12 @@ LEARNED_PROFILE_PATH = Path(
 )
 DEFAULT_HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.7"))
 DEFAULT_MIN_SAMPLES = int(os.getenv("PROFILE_MIN_SAMPLES", "3"))
+DEFAULT_SECTION_WEIGHTS: Dict[str, float] = {
+    "occupation": 0.30,
+    "hobbies": 0.25,
+    "usage": 0.25,
+    "daily_distance": 0.20,
+}
 
 
 def _norm_label(s: Any) -> str:
@@ -288,6 +294,26 @@ def _global_profile() -> Dict[str, float]:
     return gp if isinstance(gp, dict) else {}
 
 
+def _section_weights_from_meta() -> Dict[str, float]:
+    weights = dict(DEFAULT_SECTION_WEIGHTS)
+    meta_weights = _profile_meta_value("section_weights", None)
+    if not isinstance(meta_weights, dict):
+        return weights
+
+    for key in DEFAULT_SECTION_WEIGHTS:
+        try:
+            val = float(meta_weights.get(key, weights[key]))
+        except Exception:
+            continue
+        if val >= 0:
+            weights[key] = val
+
+    total = float(sum(weights.values()))
+    if total <= 0:
+        return dict(DEFAULT_SECTION_WEIGHTS)
+    return {k: float(v) / total for k, v in weights.items()}
+
+
 def _blend_profiles(
     rule_profile: Mapping[str, float],
     learned_profile: Mapping[str, float],
@@ -370,9 +396,13 @@ def _mapped_by_normalized_key(label: Any, mapping: Mapping[str, Any]) -> Any:
 def apply_choice_conversions(user_input: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(user_input)
 
-    if out.get("max_price_thb") is None and out.get("budget_choice"):
-        mapped_budget = _mapped_by_normalized_key(out.get("budget_choice"), BUDGET_MAP)
-        out["max_price_thb"] = mapped_budget
+    if out.get("budget_choice"):
+        mapped_budget = _mapped_by_normalized_key(out.get("budget_choice"), BUDGET_RANGE_MAP)
+        if isinstance(mapped_budget, dict):
+            if out.get("min_price_thb") is None:
+                out["min_price_thb"] = mapped_budget.get("min_price_thb")
+            if out.get("max_price_thb") is None:
+                out["max_price_thb"] = mapped_budget.get("max_price_thb")
 
     min_seats: Optional[int] = out.get("min_seats")
     max_seats: Optional[int] = out.get("max_seats")
@@ -397,12 +427,7 @@ def build_user_vector_from_quiz(
     debug: bool = False,
 ) -> Tuple[Dict[str, float], List[float], List[str]]:
     if section_weights is None:
-        section_weights = {
-            "occupation": 0.30,
-            "hobbies": 0.25,
-            "usage": 0.25,
-            "daily_distance": 0.20,
-        }
+        section_weights = _section_weights_from_meta()
 
     occupation = user_input.get("occupation") or "Others"
     hobbies = user_input.get("hobbies") or []
@@ -504,6 +529,14 @@ def _contains_any(text: str, terms: Iterable[str]) -> bool:
 def apply_constraints(car_df: pd.DataFrame, user_input: Dict[str, Any]) -> pd.DataFrame:
     df = car_df.copy()
 
+    min_price = user_input.get("min_price_thb")
+    if min_price is not None:
+        if "price_thb" in df.columns:
+            price = pd.to_numeric(df["price_thb"], errors="coerce")
+            df = df.loc[price >= float(min_price)]
+        else:
+            df = df.iloc[0:0]
+
     max_price = user_input.get("max_price_thb")
     if max_price is not None:
         if "price_thb" in df.columns:
@@ -524,7 +557,23 @@ def apply_constraints(car_df: pd.DataFrame, user_input: Dict[str, Any]) -> pd.Da
         else:
             df = df.iloc[0:0]
 
-    if int(user_input.get("fuel_type_EV", 0) or 0) == 1:
+    fuel_pref = _norm_label(user_input.get("fuel_preference"))
+    fuel_choice = _norm_label(user_input.get("fuel_choice"))
+    force_ev = int(user_input.get("fuel_type_EV", 0) or 0) == 1
+    if not fuel_pref and force_ev:
+        fuel_pref = "ev"
+
+    if fuel_choice in {"diesel", "petrol", "gasoline"}:
+        if "fuel_type" in df.columns:
+            fuel_text = df["fuel_type"].fillna("").astype(str)
+            if fuel_choice == "diesel":
+                matched = fuel_text.apply(lambda s: _contains_any(s, ["diesel"]))
+            else:
+                matched = fuel_text.apply(lambda s: _contains_any(s, ["petrol", "gasoline", "gas"]))
+            df = df.loc[matched]
+        else:
+            df = df.iloc[0:0]
+    elif fuel_pref == "ev":
         if "fuel_type_EV" in df.columns:
             ev = pd.to_numeric(df["fuel_type_EV"], errors="coerce").fillna(0)
             df = df.loc[ev >= 1]
@@ -535,6 +584,34 @@ def apply_constraints(car_df: pd.DataFrame, user_input: Dict[str, Any]) -> pd.Da
                 and not _contains_any(s, ["hev", "hybrid", "plug-in hybrid", "phev"])
             )
             df = df.loc[is_ev]
+        else:
+            df = df.iloc[0:0]
+    elif fuel_pref == "hybrid":
+        if "fuel_type_HEV" in df.columns:
+            hev = pd.to_numeric(df["fuel_type_HEV"], errors="coerce").fillna(0)
+            df = df.loc[hev >= 1]
+        elif "fuel_type" in df.columns:
+            fuel_text = df["fuel_type"].fillna("").astype(str)
+            is_hev = fuel_text.apply(lambda s: _contains_any(s, ["hybrid", "hev", "phev", "plug-in hybrid"]))
+            df = df.loc[is_hev]
+        else:
+            df = df.iloc[0:0]
+    elif fuel_pref == "ice":
+        if "fuel_type_ICE" in df.columns:
+            ice = pd.to_numeric(df["fuel_type_ICE"], errors="coerce").fillna(0)
+            df = df.loc[ice >= 1]
+        elif "fuel_type" in df.columns:
+            fuel_text = df["fuel_type"].fillna("").astype(str)
+            is_ice = fuel_text.apply(
+                lambda s: (
+                    _contains_any(s, ["petrol", "gasoline", "diesel"])
+                    or (
+                        not _contains_any(s, ["ev", "electric"])
+                        and not _contains_any(s, ["hybrid", "hev", "phev", "plug-in hybrid"])
+                    )
+                )
+            )
+            df = df.loc[is_ice]
         else:
             df = df.iloc[0:0]
 

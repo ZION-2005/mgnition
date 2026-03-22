@@ -6,10 +6,11 @@ import modelVariantsData from './data/modelVariants.json';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
 const API_RECOMMEND = `${API_BASE}/recommend`;
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const NAV_ITEMS = ['Home', 'Our Models', 'Recommended Cars', 'Compare', 'Saved Results', 'Showrooms', 'About Us'];
 
 const HERO_IMG =
-  'https://images.unsplash.com/photo-1493238792000-8113da705763?auto=format&fit=crop&w=1900&q=80';
+  '/hero-home-cyberster.jpg';
 
 const fallbackModelImages = {
   mg5: 'https://images.pexels.com/photos/170811/pexels-photo-170811.jpeg?auto=compress&cs=tinysrgb&w=1200',
@@ -88,8 +89,16 @@ const PROVINCE_BY_PREFIX = {
   NON: 'Nonthaburi',
   PT: 'Pathum Thani',
   AY: 'Ayutthaya',
+  AY0: 'Ayutthaya',
+  AYT: 'Ayutthaya',
   SSK: 'Samut Sakhon',
-  NPT: 'Nakhon Pathom'
+  NPT: 'Nakhon Pathom',
+  LBR: 'Lopburi',
+  NRM: 'Nakhon Ratchasima',
+  SRT: 'Surat Thani',
+  SKN: 'Sakon Nakhon',
+  PTN: 'Pattani',
+  NRT: 'Narathiwat'
 };
 
 function normalizeProvince(v = '') {
@@ -105,7 +114,7 @@ function provinceFromShowroom(showroom) {
   const code = String(showroom.id || '').slice(0, 3).toUpperCase();
   if (PROVINCE_BY_PREFIX[code]) return PROVINCE_BY_PREFIX[code];
   const m = String(showroom.address || '').match(/,\s*([^,\d]+)\s*\d{5}\s*$/i);
-  if (m) return m[1].trim();
+  if (m) return m[1].replace(/\s+Province$/i, '').trim();
   return 'Bangkok';
 }
 
@@ -134,26 +143,28 @@ function buildQuizReasons(answers = {}, car = {}) {
   const fuelType = String(car.fuel || car.fuel_type || '').toLowerCase();
 
   const budgetText = String(answers.budget_choice || answers.budget || '').toLowerCase();
+  const budgetLabel = String(answers.budget_choice || answers.budget || '').trim();
   if (budgetText && priceNum) {
     if (budgetText.includes('below 700') && priceNum <= 700000) {
-      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} is within your range (below ฿700,000).`);
+      reasons.push(`Budget fit: You selected (${budgetLabel || 'Below 700,000 THB'}), and this car is ฿${priceNum.toLocaleString()}.`);
     } else if (budgetText.includes('700,000') && budgetText.includes('999') && priceNum >= 700000 && priceNum <= 999999) {
-      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} matches your ฿700,000–฿999,999 range.`);
+      reasons.push(`Budget fit: You selected (${budgetLabel || '700,000 - 999,999 THB'}), and this car is ฿${priceNum.toLocaleString()}.`);
     } else if (budgetText.includes('1,000,000') && priceNum >= 1000000 && priceNum <= 1299999) {
-      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} matches your ฿1,000,000–฿1,299,999 range.`);
+      reasons.push(`Budget fit: You selected (${budgetLabel || '1,000,000 - 1,299,999 THB'}), and this car is ฿${priceNum.toLocaleString()}.`);
     } else if (budgetText.includes('1,300,000') && priceNum >= 1300000) {
-      reasons.push(`Budget fit: ฿${priceNum.toLocaleString()} fits your premium budget range.`);
+      reasons.push(`Budget fit: You selected (${budgetLabel || '1,300,000 THB and above'}), and this car is ฿${priceNum.toLocaleString()}.`);
     }
   }
 
-  const seatChoice = String(answers.seat_choice || answers.seats || '').toLowerCase();
+  const seatLabel = String(answers.seat_choice || answers.seats || '').trim();
+  const seatChoice = seatLabel.toLowerCase();
   if (seatChoice && seatsNum) {
     if (seatChoice.includes('2') && seatChoice.includes('seat') && seatsNum === 2) {
-      reasons.push(`Seats: ${seatsNum} seats matches your preference.`);
+      reasons.push(`Seat fit: You selected (${seatLabel || '2 seats'}), and this car has ${seatsNum} seats.`);
     } else if (seatChoice.includes('3-5') && seatsNum >= 3 && seatsNum <= 5) {
-      reasons.push(`Seats: ${seatsNum} seats matches your family use.`);
+      reasons.push(`Seat fit: You selected (${seatLabel || '3-5 seats'}), and this car has ${seatsNum} seats.`);
     } else if (seatChoice.includes('5') && seatsNum >= 5) {
-      reasons.push(`Seats: ${seatsNum} seats fits your group size.`);
+      reasons.push(`Seat fit: You selected (${seatLabel || '5+ seats'}), and this car has ${seatsNum} seats.`);
     }
   }
 
@@ -165,22 +176,173 @@ function buildQuizReasons(answers = {}, car = {}) {
       (fuelPrefRaw.includes('diesel') && fuelType.includes('diesel'));
     if (fuelMatch) {
       const label = answers.fuelType || answers.fuel_type || answers.fuel || 'Fuel';
-      reasons.push(`Fuel: ${label} aligns with your eco preference.`);
+      reasons.push(`Fuel fit: You selected (${label}), and this car matches that fuel preference.`);
     }
   }
 
-  const distance = String(answers.daily_distance || answers.distance || '').toLowerCase();
+  const distanceLabel = String(answers.daily_distance || answers.distance || '').trim();
+  const distance = distanceLabel.toLowerCase();
   const rangeNum = Number(String(car.rangeKm || car.range_km || '').replace(/[^\d]/g, '')) || 0;
   if (distance && rangeNum) {
-    reasons.push(`Range: ${rangeNum} km fits your daily distance.`);
+    reasons.push(`Range fit: You selected (${distanceLabel || 'daily distance'}), and this car supports about ${rangeNum} km.`);
   }
 
   const usage = Array.isArray(answers.usage) ? answers.usage.join(' ') : String(answers.usage || '');
   if (usage.toLowerCase().includes('city') && car.bodyType) {
-    reasons.push(`Body type: ${car.bodyType} suits city driving.`);
+    reasons.push(`Usage fit: You selected (${usage}), and this ${car.bodyType} body style suits that use.`);
   }
 
   return reasons.filter(Boolean).slice(0, 3);
+}
+
+function toReasonSnippet(reason = '') {
+  const cleaned = String(reason || '').replace(/\s+/g, ' ').trim();
+  return cleaned.replace(/[.!?]+$/g, '').trim();
+}
+
+function toPrimaryReasonClause(reason = '') {
+  const snippet = toReasonSnippet(reason);
+  if (!snippet) return '';
+  const firstClause = snippet.split(',')[0].split(' and ')[0].trim();
+  if (!firstClause) return '';
+  return firstClause.charAt(0).toUpperCase() + firstClause.slice(1);
+}
+
+function extractSelectedQuizAnswer(reason = '') {
+  const source = String(reason || '');
+  const lower = source.toLowerCase();
+  const marker = 'you selected (';
+  const startIdx = lower.indexOf(marker);
+  if (startIdx < 0) {
+    // Fallback: capture the last balanced parenthetical group in the reason text.
+    const groups = [];
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < source.length; i += 1) {
+      const ch = source[i];
+      if (ch === '(') {
+        if (depth === 0) start = i + 1;
+        depth += 1;
+      } else if (ch === ')' && depth > 0) {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          const content = source.slice(start, i).trim();
+          if (content) groups.push(content);
+          start = -1;
+        }
+      }
+    }
+    return groups.length ? groups[groups.length - 1] : '';
+  }
+
+  let cursor = startIdx + marker.length;
+  let depth = 1;
+  let out = '';
+  while (cursor < source.length && depth > 0) {
+    const ch = source[cursor];
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (depth > 0) out += ch;
+    cursor += 1;
+  }
+  return out.trim();
+}
+
+function cleanReasonFragment(value = '') {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[()]/g, '')
+    .replace(/[.!?]+$/g, '')
+    .trim();
+}
+
+function capitalizeFirst(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function extractModelTrait(reason = '') {
+  const source = String(reason || '');
+  const lower = source.toLowerCase();
+
+  const fitPrefix = source.match(/^([A-Za-z ]+)\s*fit:/i)?.[1]?.trim().toLowerCase();
+  if (fitPrefix === 'range') return 'driving range';
+  if (fitPrefix === 'seat') return 'seat capacity';
+  if (fitPrefix === 'fuel') return 'fuel type';
+  if (fitPrefix === 'budget') return 'price range';
+  if (fitPrefix === 'usage') return 'body style';
+  if (fitPrefix === 'cargo') return 'cargo space';
+  if (fitPrefix === 'power') return 'power';
+
+  if (lower.includes('driving range')) return 'driving range';
+  if (lower.includes('daily distance') || lower.includes('travel pattern') || lower.includes('commute')) return 'driving range';
+  if (lower.includes('seat')) return 'seat capacity';
+  if (lower.includes('fuel')) return 'fuel type';
+  if (lower.includes('budget') || lower.includes('price')) return 'price range';
+  if (lower.includes('cargo')) return 'cargo space';
+  if (lower.includes('body style') || lower.includes('suv') || lower.includes('sedan')) return 'body style';
+  if (lower.includes('horsepower') || lower.includes('performance') || lower.includes('power')) return 'power';
+
+  const rangeMatch = source.match(/about\s+([\d,]+\s*km)/i);
+  if (rangeMatch?.[1]) return rangeMatch[1].trim();
+
+  const seatsMatch = source.match(/has\s+(\d+\s*seats?)/i);
+  if (seatsMatch?.[1]) return seatsMatch[1].trim();
+
+  const fuelMatch = source.match(/this car is\s+([^.,]+)/i);
+  if (fuelMatch?.[1]) return fuelMatch[1].trim();
+
+  const priceMatch = source.match(/this car is\s+([฿\d,.\sA-Za-z]+)/i);
+  if (priceMatch?.[1]) return priceMatch[1].trim();
+
+  if (lower.includes('body style') || lower.includes('suv')) {
+    const bodyMatch = source.match(/this\s+([A-Za-z-]+)\s+body style/i);
+    if (bodyMatch?.[1]) return `${bodyMatch[1]} body style`;
+  }
+
+  return '';
+}
+
+function buildRecommendationHeader(cars = []) {
+  const topRawReason = (cars || [])
+    .flatMap((car) => (Array.isArray(car?.explanation?.top_reasons) ? car.explanation.top_reasons : []))
+    .find(Boolean);
+  const selectedQuizAnswer = extractSelectedQuizAnswer(topRawReason);
+  const modelTrait = extractModelTrait(topRawReason);
+  const traitText = cleanReasonFragment(modelTrait);
+  const answerText = cleanReasonFragment(selectedQuizAnswer);
+
+  if (traitText && answerText) {
+    return {
+      title: 'Recommended Only For You',
+      reason: `${capitalizeFirst(traitText)} suits your ${answerText}`
+    };
+  }
+
+  if (answerText) {
+    return {
+      title: 'Recommended Only For You',
+      reason: `This model suits your ${answerText}`
+    };
+  }
+
+  const topReason = (cars || [])
+    .flatMap((car) => (Array.isArray(car?.explanation?.top_reasons) ? car.explanation.top_reasons : []))
+    .map((reason) => toPrimaryReasonClause(reason))
+    .find(Boolean);
+  const topReasonText = cleanReasonFragment(topReason);
+
+  if (topReasonText) {
+    return {
+      title: 'Recommended Only For You',
+      reason: topReasonText
+    };
+  }
+  return {
+    title: 'Recommended Only For You',
+    reason: 'Based on your quiz preferences.'
+  };
 }
 
 function extractColorImageMap(row) {
@@ -300,6 +462,62 @@ function fmtNumber(v) {
   return n.toLocaleString();
 }
 
+function toDateInputValue(dateObj) {
+  const d = new Date(dateObj);
+  const offsetMs = d.getTimezoneOffset() * 60 * 1000;
+  return new Date(d.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function daysAgoInputValue(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return toDateInputValue(d);
+}
+
+function modelPriceLabel(price = '') {
+  const numericPrice = priceToNumber(price);
+  if (numericPrice > 0) return `Starting from ฿${fmtNumber(numericPrice)}`;
+  return `Starting from ${String(price || 'N/A')}`;
+}
+
+function isEvChoice(value = '') {
+  const lower = String(value || '').toLowerCase();
+  return (lower.includes('ev') || lower.includes('electric')) && !lower.includes('hev') && !lower.includes('hybrid');
+}
+
+function isBelow700kBudget(value = '') {
+  return String(value || '').toLowerCase().includes('below 700');
+}
+
+function isTwoSeatChoice(value = '') {
+  const lower = String(value || '').toLowerCase();
+  return lower.includes('2') && lower.includes('seat');
+}
+
+function recommendationFixSuggestions(errorMessage = '', answers = {}) {
+  const message = String(errorMessage || '').toLowerCase();
+  if (!message.includes('hard constraints')) return [];
+
+  const budget = String(answers.budget_choice || answers.budget || '').toLowerCase();
+  const fuel = String(answers.fuelType || answers.fuel_type || answers.fuel || '').toLowerCase();
+  const seats = String(answers.seat_choice || answers.seats || '').toLowerCase();
+
+  const out = [];
+  const wantsEv = isEvChoice(fuel);
+  const below700k = isBelow700kBudget(budget);
+  const twoSeats = isTwoSeatChoice(seats);
+
+  if (wantsEv && below700k) {
+    out.push('Increase budget to at least ฿709,900 for EV models.');
+  }
+  if (wantsEv) {
+    out.push('Or switch fuel preference to Hybrid/Petrol for more options.');
+  }
+  out.push('Try relaxing one filter: budget, seats, or fuel type.');
+
+  return [...new Set(out)].slice(0, 4);
+}
+
 function variantLabelFromKey(v = '') {
   const [model, variant, year] = String(v || '').split('|');
   const right = [variant, year].filter(Boolean).join(' • ');
@@ -323,6 +541,14 @@ const COLOR_HEX = {
   purple: '#8a5ad8'
 };
 
+const COLOR_NAME_HEX_OVERRIDES = {
+  flame: '#c52026',
+  bullet: '#aeb5bf',
+  photon: '#f0cf45',
+  'modern beige': '#c8b28c',
+  'champagne titanium': '#b9ac92',
+};
+
 const MODEL_COLOR_FALLBACKS = {
   'mg4 electric': ['Arctic White', 'Volcano Orange', 'Black Knight', 'Andes Grey'],
   'mg zs ev': ['Arctic White', 'Black Knight', 'Silver Metallic'],
@@ -332,23 +558,35 @@ const MODEL_COLOR_FALLBACKS = {
 };
 
 function colorHexFromName(name = '') {
-  const lower = String(name).toLowerCase();
+  const lower = String(name || '').toLowerCase().trim();
+  if (!lower) return '#d9d9d9';
+
+  const direct = COLOR_NAME_HEX_OVERRIDES[lower];
+  if (direct) return direct;
+
+  const overrideKey = Object.keys(COLOR_NAME_HEX_OVERRIDES).find((x) => lower.includes(x));
+  if (overrideKey) return COLOR_NAME_HEX_OVERRIDES[overrideKey];
+
   const k = Object.keys(COLOR_HEX).find((x) => lower.includes(x));
-  return k ? COLOR_HEX[k] : '#d9d9d9';
+  if (k) return COLOR_HEX[k];
+
+  // Reuse simplification rules so marketing names still map to representative swatch colors.
+  const simplified = simplifyColorName(lower).toLowerCase();
+  return COLOR_HEX[simplified] || '#d9d9d9';
 }
 
 const SIMPLE_COLOR_RULES = [
   { name: 'Black', test: /black|knight|midnight|carbon|graphite/ },
   { name: 'White', test: /white|arctic|pearl|snow/ },
   { name: 'Grey', test: /grey|gray|granite|ash|slate/ },
-  { name: 'Silver', test: /silver|metallic|titanium|chrome/ },
-  { name: 'Red', test: /red|scarlet|ruby|crimson/ },
+  { name: 'Silver', test: /silver|metallic|titanium|chrome|bullet/ },
+  { name: 'Red', test: /red|scarlet|ruby|crimson|flame/ },
   { name: 'Blue', test: /blue|navy|azure|sky|cobalt/ },
   { name: 'Green', test: /green|emerald|forest|olive/ },
-  { name: 'Yellow', test: /yellow|gold/ },
+  { name: 'Yellow', test: /yellow|gold|photon/ },
   { name: 'Orange', test: /orange|bronze|copper/ },
   { name: 'Brown', test: /brown|chocolate|coffee/ },
-  { name: 'Beige', test: /beige|champagne|sand|khaki/ },
+  { name: 'Beige', test: /beige|champagne|sand|khaki|modern beige/ },
   { name: 'Pink', test: /pink/ },
   { name: 'Purple', test: /purple|violet/ }
 ];
@@ -389,8 +627,8 @@ function extractVariantColors(row) {
 function estimateDistanceKm(lat, lng, province) {
   const p = String(province || '').toLowerCase();
   const center = p.includes('bangkok') ? { lat: 13.7563, lng: 100.5018 } : { lat: 13.7, lng: 100.6 };
-  const la = Number(lat);
-  const lo = Number(lng);
+  const la = parseCoordinateNumber(lat);
+  const lo = parseCoordinateNumber(lng);
   if (Number.isNaN(la) || Number.isNaN(lo)) return null;
   const toRad = (d) => (d * Math.PI) / 180;
   const dLat = toRad(la - center.lat);
@@ -403,10 +641,10 @@ function estimateDistanceKm(lat, lng, province) {
 }
 
 function haversineKm(lat1, lng1, lat2, lng2) {
-  const a1 = Number(lat1);
-  const o1 = Number(lng1);
-  const a2 = Number(lat2);
-  const o2 = Number(lng2);
+  const a1 = parseCoordinateNumber(lat1);
+  const o1 = parseCoordinateNumber(lng1);
+  const a2 = parseCoordinateNumber(lat2);
+  const o2 = parseCoordinateNumber(lng2);
   if ([a1, o1, a2, o2].some((v) => Number.isNaN(v))) return null;
   const toRad = (d) => (d * Math.PI) / 180;
   const dLat = toRad(a2 - a1);
@@ -415,6 +653,212 @@ function haversineKm(lat1, lng1, lat2, lng2) {
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(a1)) * Math.cos(toRad(a2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function parseCoordinateNumber(value) {
+  if (typeof value === 'number') return value;
+  let raw = String(value ?? '').trim();
+  if (!raw) return Number.NaN;
+  // Convert common locale format "13,815836" -> "13.815836"
+  if (raw.includes(',') && !raw.includes('.')) {
+    raw = raw.replace(/,/g, '.');
+  } else {
+    // Remove thousands separators when dot-decimal is already present.
+    raw = raw.replace(/,/g, '');
+  }
+  // Keep only numeric tokens used in lat/lng strings.
+  raw = raw.replace(/[^0-9.\-+eE]/g, '');
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function parseShowroomCoord(showroom = {}) {
+  const lat = parseCoordinateNumber(showroom.lat);
+  const lng = parseCoordinateNumber(showroom.lng);
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+  return { lat, lng };
+}
+
+function isInsideThailandBounds(coord) {
+  if (!coord) return false;
+  return coord.lat >= 5.0 && coord.lat <= 21.0 && coord.lng >= 97.0 && coord.lng <= 106.5;
+}
+
+function normalizeGeoText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const PROVINCE_MATCH_ALIASES = {
+  bangkok: ['krung thep maha nakhon', 'krungthep maha nakhon', 'krung thep', 'กรุงเทพมหานคร'],
+  'samut prakan': ['chang wat samut prakan', 'สมุทรปราการ'],
+  ayutthaya: ['phra nakhon si ayutthaya', 'พระนครศรีอยุธยา'],
+  'nakhon pathom': ['chang wat nakhon pathom', 'นครปฐม'],
+  lopburi: ['lop buri', 'chang wat lopburi', 'ลพบุรี'],
+  'nakhon ratchasima': ['korat', 'chang wat nakhon ratchasima', 'นครราชสีมา'],
+  'surat thani': ['chang wat surat thani', 'สุราษฎร์ธานี'],
+  'sakon nakhon': ['chang wat sakon nakhon', 'สกลนคร'],
+  pattani: ['chang wat pattani', 'ปัตตานี'],
+  narathiwat: ['chang wat narathiwat', 'นราธิวาส']
+};
+
+function provinceAliases(province = '') {
+  const normalized = normalizeProvince(province).replace(/\s+province$/i, '').trim();
+  const aliases = PROVINCE_MATCH_ALIASES[normalized] || [];
+  return [...new Set([normalized, ...aliases].map(normalizeGeoText).filter(Boolean))];
+}
+
+function geocodeResultText(result = {}) {
+  const components = Array.isArray(result?.address_components) ? result.address_components : [];
+  const chunks = [result?.formatted_address || ''];
+  components.forEach((c) => {
+    chunks.push(c?.long_name || '');
+    chunks.push(c?.short_name || '');
+  });
+  return normalizeGeoText(chunks.join(' '));
+}
+
+function geocodePostalMatches(result = {}, expectedPostal = '') {
+  const postal = String(expectedPostal || '').trim();
+  if (!postal) return true;
+  const components = Array.isArray(result?.address_components) ? result.address_components : [];
+  const postalComp = components.find(
+    (c) => Array.isArray(c?.types) && c.types.includes('postal_code')
+  );
+  if (postalComp) {
+    const packed = `${postalComp.long_name || ''} ${postalComp.short_name || ''}`;
+    return packed.includes(postal);
+  }
+  return geocodeResultText(result).includes(postal);
+}
+
+function geocodeProvinceMatches(result = {}, expectedProvince = '') {
+  const aliases = provinceAliases(expectedProvince);
+  if (!aliases.length) return true;
+  const components = Array.isArray(result?.address_components) ? result.address_components : [];
+  const provinceComp = components.find(
+    (c) => Array.isArray(c?.types) && c.types.includes('administrative_area_level_1')
+  );
+  const localityComp = components.find(
+    (c) => Array.isArray(c?.types) && c.types.includes('locality')
+  );
+  const haystack = normalizeGeoText([
+    provinceComp?.long_name,
+    provinceComp?.short_name,
+    localityComp?.long_name,
+    localityComp?.short_name,
+    geocodeResultText(result)
+  ].filter(Boolean).join(' '));
+  return aliases.some((alias) => haystack.includes(alias));
+}
+
+function pickBestGeocodeResult(results = [], showroom = {}) {
+  const expectedPostal = postalFromAddress(showroom.address);
+  const expectedProvince = provinceFromShowroom(showroom);
+  const expectedAddress = normalizeGeoText(showroom.address);
+  const expectedName = normalizeGeoText(showroom.name);
+  let best = null;
+  let bestScore = -1;
+
+  results.forEach((result) => {
+    const loc = result?.geometry?.location;
+    const lat = typeof loc?.lat === 'function' ? Number(loc.lat()) : Number(loc?.lat);
+    const lng = typeof loc?.lng === 'function' ? Number(loc.lng()) : Number(loc?.lng);
+    const coord = Number.isNaN(lat) || Number.isNaN(lng) ? null : { lat, lng };
+    if (!coord || !isInsideThailandBounds(coord)) return;
+
+    const provinceOk = geocodeProvinceMatches(result, expectedProvince);
+    const postalOk = geocodePostalMatches(result, expectedPostal);
+    const resultText = geocodeResultText(result);
+
+    // Quick lexical hint from address/name to avoid selecting unrelated places.
+    let lexicalHits = 0;
+    const probeTokens = [
+      ...expectedAddress.split(' ').filter((t) => t.length >= 5),
+      ...expectedName.split(' ').filter((t) => t.length >= 5),
+    ].slice(0, 16);
+    probeTokens.forEach((token) => {
+      if (resultText.includes(token)) lexicalHits += 1;
+    });
+
+    let score = 0;
+    if (provinceOk) score += 6;
+    if (postalOk && expectedPostal) score += 8;
+    score += Math.min(lexicalHits, 4);
+    if (Array.isArray(result?.types) && (result.types.includes('street_address') || result.types.includes('premise'))) {
+      score += 1;
+    }
+
+    // If no strong structured match, require at least some lexical overlap.
+    const hasStrongStructuredMatch = provinceOk || (expectedPostal && postalOk);
+    if (!hasStrongStructuredMatch && lexicalHits === 0) return;
+
+    if (score > bestScore) {
+      best = coord;
+      bestScore = score;
+    }
+  });
+
+  return bestScore >= 1 ? best : null;
+}
+
+function pickBestPlaceResult(results = [], showroom = {}) {
+  const expectedPostal = postalFromAddress(showroom.address);
+  const expectedProvince = provinceFromShowroom(showroom);
+  const expectedAddress = normalizeGeoText(showroom.address);
+  const expectedName = normalizeGeoText(showroom.name);
+  const provinceAliasSet = provinceAliases(expectedProvince);
+  let best = null;
+  let bestScore = -1;
+
+  results.forEach((result) => {
+    const loc = result?.geometry?.location;
+    const lat = typeof loc?.lat === 'function' ? Number(loc.lat()) : Number(loc?.lat);
+    const lng = typeof loc?.lng === 'function' ? Number(loc.lng()) : Number(loc?.lng);
+    const coord = Number.isNaN(lat) || Number.isNaN(lng) ? null : { lat, lng };
+    if (!coord || !isInsideThailandBounds(coord)) return;
+
+    const text = normalizeGeoText(
+      [result?.name || '', result?.formatted_address || '', result?.vicinity || '']
+        .join(' ')
+    );
+    const provinceOk = provinceAliasSet.length ? provinceAliasSet.some((alias) => text.includes(alias)) : false;
+    const postalOk = expectedPostal ? text.includes(expectedPostal) : false;
+
+    let lexicalHits = 0;
+    const probeTokens = [
+      ...expectedAddress.split(' ').filter((t) => t.length >= 5),
+      ...expectedName.split(' ').filter((t) => t.length >= 5),
+    ].slice(0, 16);
+    probeTokens.forEach((token) => {
+      if (text.includes(token)) lexicalHits += 1;
+    });
+
+    let score = 0;
+    if (provinceOk) score += 6;
+    if (postalOk) score += 8;
+    score += Math.min(lexicalHits, 4);
+    if (Array.isArray(result?.types) && result.types.includes('car_dealer')) score += 2;
+
+    const hasStrongStructuredMatch = provinceOk || postalOk;
+    if (!hasStrongStructuredMatch && lexicalHits === 0) return;
+
+    if (score > bestScore) {
+      best = coord;
+      bestScore = score;
+    }
+  });
+
+  return bestScore >= 1 ? best : null;
+}
+
+function isBangkokShowroom(showroom = {}) {
+  const address = String(showroom.address || '');
+  const name = String(showroom.name || '');
+  return /bangkok/i.test(address) || /\(bangkok\)/i.test(name);
 }
 
 function normalizeSavedCar(item) {
@@ -442,6 +886,7 @@ function navLabelForPage(pageName) {
   if (pageName === 'models') return 'Our Models';
   if (pageName === 'results') return 'Recommended Cars';
   if (pageName === 'compare') return 'Compare';
+  if (pageName === 'profile') return '';
   if (pageName === 'saved') return 'Saved Results';
   if (pageName === 'showrooms' || pageName === 'map' || pageName === 'booking') return 'Showrooms';
   if (pageName === 'about') return 'About Us';
@@ -483,16 +928,362 @@ function hydrateSavedCar(item, variantMap, modelMap) {
   };
 }
 
+let googleMapsScriptPromise = null;
+
+function loadGoogleMapsScript(apiKey) {
+  if (!apiKey) return Promise.reject(new Error('Missing Google Maps API key.'));
+  if (window.google?.maps) return Promise.resolve(window.google.maps);
+  if (googleMapsScriptPromise) return googleMapsScriptPromise;
+
+  googleMapsScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if (window.google?.maps) resolve(window.google.maps);
+      else reject(new Error('Google Maps failed to load.'));
+    };
+    script.onerror = () => reject(new Error('Failed to load Google Maps script.'));
+    document.head.appendChild(script);
+  });
+
+  return googleMapsScriptPromise;
+}
+
+function ShowroomGoogleMap({
+  showrooms = [],
+  selectedShowroom = null,
+  userLocation = null,
+  onSelectShowroom = () => {}
+}) {
+  const mapElRef = useRef(null);
+  const mapRef = useRef(null);
+  const markersRef = useRef([]);
+  const userMarkerRef = useRef(null);
+  const infoWindowRef = useRef(null);
+  const geocodeStatusWarnedRef = useRef({});
+  const [mapError, setMapError] = useState('');
+  const [mapReady, setMapReady] = useState(false);
+  const [resolvedCoordMap, setResolvedCoordMap] = useState({});
+
+  const showroomCoordKey = useCallback((s) => String(s?.id || `${s?.name || ''}|${s?.address || ''}`), []);
+
+  const esc = useCallback((v) => String(v || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;'), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!GOOGLE_MAPS_API_KEY) return undefined;
+
+    loadGoogleMapsScript(GOOGLE_MAPS_API_KEY)
+      .then(() => {
+        if (cancelled || !mapElRef.current) return;
+        if (!mapRef.current) {
+          const fallbackCenter = { lat: 13.7563, lng: 100.5018 };
+          const userCenter = userLocation
+            ? { lat: parseCoordinateNumber(userLocation.lat), lng: parseCoordinateNumber(userLocation.lng) }
+            : null;
+          const selectedCenter = selectedShowroom
+            ? { lat: parseCoordinateNumber(selectedShowroom.lat), lng: parseCoordinateNumber(selectedShowroom.lng) }
+            : null;
+          const center = (selectedCenter && !Number.isNaN(selectedCenter.lat) && !Number.isNaN(selectedCenter.lng))
+            ? selectedCenter
+            : (userCenter && !Number.isNaN(userCenter.lat) && !Number.isNaN(userCenter.lng))
+              ? userCenter
+            : fallbackCenter;
+
+          mapRef.current = new window.google.maps.Map(mapElRef.current, {
+            center,
+            zoom: selectedShowroom ? 12 : 10,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: true
+          });
+          infoWindowRef.current = new window.google.maps.InfoWindow();
+        }
+        setMapReady(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMapError(err?.message || 'Unable to load Google Maps.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mapReady, selectedShowroom, userLocation]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !window.google?.maps) return undefined;
+    const lat = parseCoordinateNumber(userLocation?.lat);
+    const lng = parseCoordinateNumber(userLocation?.lng);
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setMap(null);
+      userMarkerRef.current = null;
+    }
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return undefined;
+
+    userMarkerRef.current = new window.google.maps.Marker({
+      map: mapRef.current,
+      position: { lat, lng },
+      title: 'Your location',
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: '#1d4ed8',
+        fillOpacity: 0.95,
+        strokeColor: '#ffffff',
+        strokeWeight: 2
+      },
+      zIndex: 2000
+    });
+
+    return () => {
+      if (userMarkerRef.current) {
+        userMarkerRef.current.setMap(null);
+        userMarkerRef.current = null;
+      }
+    };
+  }, [mapReady, userLocation]);
+
+  useEffect(() => {
+    if (!mapReady || !window.google?.maps?.Geocoder || !showrooms.length) return;
+    let cancelled = false;
+    const geocoder = new window.google.maps.Geocoder();
+    const placesService = window.google?.maps?.places && mapRef.current
+      ? new window.google.maps.places.PlacesService(mapRef.current)
+      : null;
+    const cacheKey = 'mgnition_showroom_geocode_cache_v2';
+
+    let cached = {};
+    try {
+      cached = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+    } catch (_err) {
+      cached = {};
+    }
+
+    const initialUpdates = {};
+    showrooms.forEach((s) => {
+      const k = showroomCoordKey(s);
+      const hit = cached[k];
+      const lat = Number(hit?.lat);
+      const lng = Number(hit?.lng);
+      const expectedProvince = normalizeProvince(provinceFromShowroom(s));
+      const expectedPostal = postalFromAddress(s.address);
+      const hitProvince = normalizeProvince(hit?.province || '');
+      const hitPostal = String(hit?.postal || '').trim();
+      const hitAddress = String(hit?.address || '').trim();
+      const expectedAddress = String(s.address || '').trim();
+      const metadataOk = hitProvince === expectedProvince
+        && (!expectedPostal || !hitPostal || hitPostal === expectedPostal)
+        && (!hitAddress || normalizeGeoText(hitAddress) === normalizeGeoText(expectedAddress));
+
+      if (!Number.isNaN(lat) && !Number.isNaN(lng) && metadataOk) {
+        initialUpdates[k] = { lat, lng };
+      }
+    });
+    if (Object.keys(initialUpdates).length) {
+      setResolvedCoordMap((prev) => ({ ...prev, ...initialUpdates }));
+    }
+
+    const geocodeAddress = (showroom, address) =>
+      new Promise((resolve) => {
+        geocoder.geocode({ address, region: 'th', componentRestrictions: { country: 'TH' } }, (results, status) => {
+          if (status !== 'OK' || !Array.isArray(results) || !results.length) {
+            if (!geocodeStatusWarnedRef.current[status]) {
+              // eslint-disable-next-line no-console
+              console.warn(`[showroom-map] geocode failed: ${status}`, { address });
+              geocodeStatusWarnedRef.current[status] = true;
+            }
+            resolve(null);
+            return;
+          }
+          resolve(pickBestGeocodeResult(results, showroom));
+        });
+      });
+
+    const placeSearchAddress = (showroom, query) =>
+      new Promise((resolve) => {
+        if (!placesService) {
+          resolve(null);
+          return;
+        }
+        placesService.textSearch({ query, region: 'th' }, (results, status) => {
+          if (status !== 'OK' || !Array.isArray(results) || !results.length) {
+            resolve(null);
+            return;
+          }
+          resolve(pickBestPlaceResult(results, showroom));
+        });
+      });
+
+    (async () => {
+      const runtimeUpdates = {};
+      let cacheChanged = false;
+      for (const s of showrooms) {
+        if (cancelled) return;
+        const k = showroomCoordKey(s);
+        const base = parseShowroomCoord(s);
+        const fromCache = initialUpdates[k];
+        const current = fromCache || base;
+        const shouldGeocode = Boolean(s.address) && (!current || !isInsideThailandBounds(current));
+        if (!shouldGeocode) continue;
+        const queryCandidates = [
+          String(s.address || '').trim(),
+          `${String(s.name || '').trim()}, ${String(s.address || '').trim()}`,
+          `${String(s.name || '').trim()}, ${provinceFromShowroom(s)}, Thailand`,
+        ].filter(Boolean);
+
+        let geocoded = null;
+        for (const q of queryCandidates) {
+          // eslint-disable-next-line no-await-in-loop
+          geocoded = await geocodeAddress(s, q);
+          if (!geocoded) {
+            // eslint-disable-next-line no-await-in-loop
+            geocoded = await placeSearchAddress(s, q);
+          }
+          if (geocoded && isInsideThailandBounds(geocoded)) break;
+        }
+        if (!geocoded || !isInsideThailandBounds(geocoded)) continue;
+        runtimeUpdates[k] = geocoded;
+        cached[k] = {
+          ...geocoded,
+          province: provinceFromShowroom(s),
+          postal: postalFromAddress(s.address),
+          address: String(s.address || '').trim()
+        };
+        cacheChanged = true;
+      }
+      if (cancelled) return;
+      if (Object.keys(runtimeUpdates).length) {
+        setResolvedCoordMap((prev) => ({ ...prev, ...runtimeUpdates }));
+      }
+      if (cacheChanged) {
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(cached));
+        } catch (_err) {
+          // ignore storage errors
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mapReady, showrooms, showroomCoordKey]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !window.google?.maps) return;
+
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+
+    const bounds = new window.google.maps.LatLngBounds();
+    let validCount = 0;
+
+    showrooms.forEach((s) => {
+      const key = showroomCoordKey(s);
+      const coord = resolvedCoordMap[key] || parseShowroomCoord(s);
+      if (!coord) return;
+      const { lat, lng } = coord;
+
+      const marker = new window.google.maps.Marker({
+        map: mapRef.current,
+        position: { lat, lng },
+        title: s.name
+      });
+
+      marker.addListener('click', () => {
+        onSelectShowroom({ ...s, lat, lng });
+        if (!infoWindowRef.current) return;
+        const distance = s.smartDistanceKm ? `${s.smartDistanceKm} km` : '-';
+        const content = `
+          <div style="max-width:280px;font-family:Arial,sans-serif;line-height:1.45;">
+            <div style="font-weight:700;font-size:14px;margin-bottom:6px;">${esc(s.name)}</div>
+            <div style="font-size:13px;margin-bottom:6px;">${esc(s.address)}</div>
+            <div style="font-size:12px;color:#444;">Phone: ${esc(s.phone || '-')}</div>
+            <div style="font-size:12px;color:#444;">Distance: ${esc(distance)}</div>
+          </div>
+        `;
+        infoWindowRef.current.setContent(content);
+        infoWindowRef.current.open({
+          map: mapRef.current,
+          anchor: marker
+        });
+      });
+      markersRef.current.push(marker);
+      bounds.extend({ lat, lng });
+      validCount += 1;
+    });
+
+    if (validCount === 0 && showrooms.length) {
+      const missing = showrooms
+        .filter((s) => !(resolvedCoordMap[showroomCoordKey(s)] || parseShowroomCoord(s)))
+        .map((s) => s.id || s.name);
+      // eslint-disable-next-line no-console
+      console.warn('[showroom-map] no valid marker coordinates for selected province', missing);
+    }
+
+    if (validCount > 1) {
+      mapRef.current.fitBounds(bounds, 64);
+    } else if (validCount === 1) {
+      mapRef.current.setCenter(bounds.getCenter());
+      mapRef.current.setZoom(12);
+    } else {
+      const userLat = parseCoordinateNumber(userLocation?.lat);
+      const userLng = parseCoordinateNumber(userLocation?.lng);
+      if (!Number.isNaN(userLat) && !Number.isNaN(userLng)) {
+        mapRef.current.setCenter({ lat: userLat, lng: userLng });
+        mapRef.current.setZoom(11);
+      }
+    }
+  }, [esc, mapReady, onSelectShowroom, resolvedCoordMap, showroomCoordKey, showrooms, userLocation]);
+
+  useEffect(() => {
+    if (!mapRef.current || !selectedShowroom) return;
+    const key = showroomCoordKey(selectedShowroom);
+    const coord = resolvedCoordMap[key] || parseShowroomCoord(selectedShowroom);
+    if (!coord) return;
+    mapRef.current.panTo(coord);
+    mapRef.current.setZoom(17);
+  }, [resolvedCoordMap, selectedShowroom, showroomCoordKey]);
+
+  if (!GOOGLE_MAPS_API_KEY || mapError) {
+    return (
+      <iframe
+        title="map"
+        src="https://www.openstreetmap.org/export/embed.html?bbox=99.8%2C13.3%2C100.9%2C14.2&layer=mapnik"
+      />
+    );
+  }
+
+  return <div ref={mapElRef} className="google-map-canvas" aria-label="Google showroom map" />;
+}
+
 export default function App() {
-  const [page, setPage] = useState('landing');
-  const [activeNav, setActiveNav] = useState('');
-  const [pageHistory, setPageHistory] = useState(['landing']);
+  const [page, setPage] = useState('home');
+  const [activeNav, setActiveNav] = useState('Home');
+  const [pageHistory, setPageHistory] = useState(['home']);
   const backNavRef = useRef(false);
+  const autoHydrateRecommendationsRef = useRef(false);
   const impressionLogRef = useRef({});
+  const homeSliderRef = useRef(null);
+  const [homeSlideIndex, setHomeSlideIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const [selectedCar, setSelectedCar] = useState(null);
+  const [detailFromRecommendation, setDetailFromRecommendation] = useState(false);
   const [results, setResults] = useState([]);
   const [recommendError, setRecommendError] = useState('');
+  const [detailRating, setDetailRating] = useState(0);
+  const [detailRatingLoading, setDetailRatingLoading] = useState(false);
+  const [detailRatingMessage, setDetailRatingMessage] = useState('');
+  const [detailRatingError, setDetailRatingError] = useState('');
   const [showMoreReasons, setShowMoreReasons] = useState(false);
   const [province, setProvince] = useState('Bangkok');
   const [loading, setLoading] = useState(false);
@@ -504,6 +1295,11 @@ export default function App() {
   const [selectedShowroom, setSelectedShowroom] = useState(null);
   const [showroomPostal, setShowroomPostal] = useState('');
   const [showroomModelPref, setShowroomModelPref] = useState('');
+  const [userLocation, setUserLocation] = useState(null);
+  const [routeDistanceKmByShowroom, setRouteDistanceKmByShowroom] = useState({});
+  const [showroomGeoLoading, setShowroomGeoLoading] = useState(false);
+  const [showroomGeoError, setShowroomGeoError] = useState('');
+  const mapSectionRef = useRef(null);
   const [bookingForm, setBookingForm] = useState({ model: '', variant_key: '', notes: '' });
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingMessage, setBookingMessage] = useState('');
@@ -530,12 +1326,45 @@ export default function App() {
     : isGuest
       ? NAV_ITEMS.filter((item) => !['Recommended Cars', 'Compare', 'Saved Results'].includes(item))
       : NAV_ITEMS;
-  const hasQuizAnswers = useMemo(() => {
-    return Object.values(answers || {}).some((v) => {
-      if (Array.isArray(v)) return v.length > 0;
-      return Boolean(String(v || '').trim());
+  const hasCompletedQuiz = useMemo(() => {
+    return quizQuestions.every((q) => {
+      const value = answers?.[q.key];
+      if (q.type === 'multi') return Array.isArray(value) && value.length > 0;
+      return Boolean(String(value || '').trim());
     });
   }, [answers]);
+  const noMatchSuggestions = useMemo(
+    () => recommendationFixSuggestions(recommendError, answers),
+    [recommendError, answers]
+  );
+
+  const isOnboardingOptionDisabled = useCallback(
+    (questionKey, option) => {
+      const selectedBudget = answers.budget || answers.budget_choice || '';
+      const selectedFuel = answers.fuelType || answers.fuel_type || '';
+
+      if (questionKey === 'budget' && isBelow700kBudget(option) && isEvChoice(selectedFuel)) return true;
+      if (questionKey === 'fuelType' && isEvChoice(option) && isBelow700kBudget(selectedBudget)) return true;
+      return false;
+    },
+    [answers]
+  );
+
+  const onboardingConstraintNotes = useMemo(() => {
+    if (!currentQuestion) return [];
+    const selectedBudget = answers.budget || answers.budget_choice || '';
+    const selectedFuel = answers.fuelType || answers.fuel_type || '';
+    const notes = [];
+
+    if (currentQuestion.key === 'budget' && isEvChoice(selectedFuel)) {
+      notes.push("EV starts at around ฿709,900, so 'Below 700,000 THB' is unavailable.");
+    }
+    if (currentQuestion.key === 'fuelType' && isBelow700kBudget(selectedBudget)) {
+      notes.push("At 'Below 700,000 THB', EV currently has no available models.");
+    }
+
+    return notes;
+  }, [currentQuestion, answers]);
 
   useEffect(() => {
     if (page === 'booking' && (isGuest || isAdmin)) {
@@ -544,7 +1373,18 @@ export default function App() {
   }, [page, isGuest, isAdmin]);
 
   useEffect(() => {
+    setProfileForm({
+      full_name: currentUser?.full_name || '',
+      phone: currentUser?.phone || '',
+      email: currentUser?.email || '',
+    });
+  }, [currentUser?.full_name, currentUser?.phone, currentUser?.email]);
+
+  useEffect(() => {
     setShowMoreReasons(false);
+    setDetailRating(0);
+    setDetailRatingMessage('');
+    setDetailRatingError('');
   }, [selectedCar?.variant_key, selectedCar?.model, selectedCar?.variant]);
   const [savedCars, setSavedCars] = useState([]);
   const resultReasonMap = useMemo(() => {
@@ -576,15 +1416,34 @@ export default function App() {
   const [showSignupConfirm, setShowSignupConfirm] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [profileForm, setProfileForm] = useState({ full_name: '', phone: '', email: '' });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
+  const [profileError, setProfileError] = useState('');
   const [publicPromotions, setPublicPromotions] = useState([]);
   const [publicBestSellers, setPublicBestSellers] = useState([]);
-  const [publicAdminModels, setPublicAdminModels] = useState([]);
+  const [publicCarOfMonth, setPublicCarOfMonth] = useState([]);
+  const [carOfMonthScope, setCarOfMonthScope] = useState('monthly');
+  const [carOfMonthPeriod, setCarOfMonthPeriod] = useState('');
+  const [carOfMonthError, setCarOfMonthError] = useState('');
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [adminBookings, setAdminBookings] = useState([]);
+  const [adminUsers, setAdminUsers] = useState([]);
   const [adminPromotions, setAdminPromotions] = useState([]);
   const [adminBestSellers, setAdminBestSellers] = useState([]);
   const [adminMessage, setAdminMessage] = useState('');
   const [adminSection, setAdminSection] = useState('overview');
+  const [analyticsRange, setAnalyticsRange] = useState(() => ({
+    start_date: daysAgoInputValue(29),
+    end_date: daysAgoInputValue(0),
+    granularity: 'day',
+    top_n: 5
+  }));
+  const [adminAnalyticsRangeData, setAdminAnalyticsRangeData] = useState(null);
+  const [adminAnalyticsRangeLoading, setAdminAnalyticsRangeLoading] = useState(false);
+  const [adminAnalyticsRangeError, setAdminAnalyticsRangeError] = useState('');
+  const promoImageInputRef = useRef(null);
+  const [promoImageName, setPromoImageName] = useState('');
   const [promoForm, setPromoForm] = useState({
     title: '',
     description: '',
@@ -602,20 +1461,6 @@ export default function App() {
     variant_key: '',
     variant_name: '',
     rank: ''
-  });
-  const [adminModelForm, setAdminModelForm] = useState({
-    model: '',
-    variant: '',
-    year: '',
-    price_thb: '',
-    fuel_type: '',
-    seats: '',
-    body_type: '',
-    horsepower_hp: '',
-    torque_nm: '',
-    range_km: '',
-    cargo_liters: '',
-    image_url: ''
   });
 
   const variantRows = useMemo(() => modelVariantsData.filter((r) => r.Model), []);
@@ -697,7 +1542,7 @@ export default function App() {
         defaultColor: m.defaultColor || m.default_color || modelDefaults[m.model]?.defaultColor || ''
       }));
   }, [modelDefaults]);
-  const models = useMemo(() => [...baseModels, ...publicAdminModels], [baseModels, publicAdminModels]);
+  const models = useMemo(() => [...baseModels], [baseModels]);
   const modelByName = useMemo(() => {
     const map = new Map();
     models.forEach((m) => map.set(normModelName(m.model), m));
@@ -752,14 +1597,44 @@ export default function App() {
     logImpressions(keys, 'best_sellers');
   }, [page, bestSellerCars, impressionKeyForCar, logImpressions]);
 
+  const carOfMonthCars = useMemo(() => {
+    return (publicCarOfMonth || [])
+      .slice(0, 1)
+      .map((item) =>
+        hydrateSavedCar(
+          {
+            variant_key: item.variant_key || '',
+            model: item.model || '',
+            variant: item.variant || '',
+            year: item.year || '',
+            price: item.price || item.starting_price || '',
+            fuel: item.fuel || '',
+            seats: item.seats || '',
+            bodyType: item.bodyType || item.body_type || '',
+            imagePageUrl: item.imagePageUrl || item.image_url || ''
+          },
+          variantByKey,
+          modelByName
+        )
+      )
+      .filter(Boolean);
+  }, [publicCarOfMonth, variantByKey, modelByName]);
+
+  useEffect(() => {
+    if (page !== 'home') return;
+    const keys = carOfMonthCars.map(impressionKeyForCar).filter(Boolean);
+    logImpressions(keys, 'car_of_month');
+  }, [page, carOfMonthCars, impressionKeyForCar, logImpressions]);
+
   const promoCars = useMemo(() => {
     const a = models.find((m) => m.model.toLowerCase().includes('vs hev')) || models.find((m) => m.model.toLowerCase().includes('mg5'));
     const b = models.find((m) => m.model.toLowerCase().includes('mg4')) || models[1];
     return [a, b].filter(Boolean);
   }, [models]);
 
+  const bangkokShowrooms = useMemo(() => showroomsData.filter((s) => isBangkokShowroom(s)), []);
   const provinceOptions = useMemo(() => {
-    const all = [...new Set(showroomsData.map((s) => provinceFromShowroom(s)))].sort();
+    const all = [...new Set(showroomsData.map((s) => provinceFromShowroom(s)))].filter(Boolean).sort();
     return all.length ? all : ['Bangkok'];
   }, []);
 
@@ -772,7 +1647,162 @@ export default function App() {
     return [...new Set(models.map((m) => m.model).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   }, [models]);
 
+  const handleUseCurrentLocation = useCallback(() => {
+    if (!navigator?.geolocation) {
+      setShowroomGeoError('Geolocation is not available in this browser.');
+      return;
+    }
+    setShowroomGeoLoading(true);
+    setShowroomGeoError('');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = Number(position?.coords?.latitude);
+        const lng = Number(position?.coords?.longitude);
+        if (Number.isNaN(lat) || Number.isNaN(lng)) {
+          setShowroomGeoError('Could not read your location coordinates.');
+          setShowroomGeoLoading(false);
+          return;
+        }
+        const current = { lat, lng };
+        setUserLocation(current);
+
+        let nearest = null;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        showroomsData.forEach((s) => {
+          const d = haversineKm(lat, lng, s.lat, s.lng);
+          if (d === null || d >= nearestDistance) return;
+          nearest = s;
+          nearestDistance = d;
+        });
+        if (nearest) {
+          setProvince(provinceFromShowroom(nearest));
+          setSelectedShowroom(nearest);
+        }
+
+        setShowroomGeoLoading(false);
+      },
+      (err) => {
+        const msg =
+          err?.code === 1
+            ? 'Location permission denied. Please allow location access and try again.'
+            : err?.code === 3
+              ? 'Location request timed out. Please try again.'
+              : 'Unable to get your location right now.';
+        setShowroomGeoError(msg);
+        setShowroomGeoLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 60000
+      }
+    );
+  }, []);
+
+  const focusShowroomOnMap = useCallback((showroom, shouldScroll = false) => {
+    if (!showroom) return;
+    setSelectedShowroom(showroom);
+    if (page !== 'map') setPage('map');
+    if (shouldScroll || page !== 'map') {
+      window.setTimeout(() => {
+        mapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    }
+  }, [page]);
+
+  const showroomKey = useCallback((s) => String(s?.id || `${s?.name || ''}|${s?.address || ''}`), []);
+  const selectedShowroomKey = useMemo(
+    () => showroomKey(selectedShowroom),
+    [selectedShowroom, showroomKey]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const originLat = parseCoordinateNumber(userLocation?.lat);
+    const originLng = parseCoordinateNumber(userLocation?.lng);
+    if (Number.isNaN(originLat) || Number.isNaN(originLng) || !filteredShowrooms.length || !GOOGLE_MAPS_API_KEY) {
+      setRouteDistanceKmByShowroom({});
+      return undefined;
+    }
+
+    const toChunks = (list, size) => {
+      const out = [];
+      for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+      return out;
+    };
+
+    const destinations = filteredShowrooms
+      .map((s) => {
+        const coord = parseShowroomCoord(s);
+        const destination = coord || String(s.address || '').trim() || String(s.name || '').trim();
+        if (!destination) return null;
+        return { key: showroomKey(s), destination };
+      })
+      .filter(Boolean);
+    if (!destinations.length) {
+      setRouteDistanceKmByShowroom({});
+      return undefined;
+    }
+
+    const run = async () => {
+      try {
+        await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
+        if (!window.google?.maps?.DistanceMatrixService) {
+          if (!cancelled) setRouteDistanceKmByShowroom({});
+          return;
+        }
+
+        const service = new window.google.maps.DistanceMatrixService();
+        const all = {};
+        const chunks = toChunks(destinations, 25);
+        for (const chunk of chunks) {
+          // eslint-disable-next-line no-await-in-loop
+          const elements = await new Promise((resolve, reject) => {
+            service.getDistanceMatrix(
+              {
+                origins: [{ lat: originLat, lng: originLng }],
+                destinations: chunk.map((x) => x.destination),
+                travelMode: window.google.maps.TravelMode.DRIVING,
+                unitSystem: window.google.maps.UnitSystem.METRIC,
+              },
+              (response, status) => {
+                if (status !== 'OK' || !response?.rows?.[0]?.elements) {
+                  reject(new Error(status || 'DISTANCE_ERROR'));
+                  return;
+                }
+                resolve(response.rows[0].elements);
+              }
+            );
+          });
+
+          chunk.forEach((item, idx) => {
+            const element = elements[idx];
+            const meters = Number(element?.distance?.value);
+            if (element?.status === 'OK' && Number.isFinite(meters)) {
+              all[item.key] = meters / 1000;
+            }
+          });
+        }
+
+        if (!cancelled) setRouteDistanceKmByShowroom(all);
+      } catch (_err) {
+        if (!cancelled) setRouteDistanceKmByShowroom({});
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredShowrooms, showroomKey, userLocation]);
+
   const showroomTarget = useMemo(() => {
+    const userLat = parseCoordinateNumber(userLocation?.lat);
+    const userLng = parseCoordinateNumber(userLocation?.lng);
+    if (!Number.isNaN(userLat) && !Number.isNaN(userLng)) {
+      return { lat: userLat, lng: userLng };
+    }
     if (!filteredShowrooms.length) return null;
     const postal = String(showroomPostal || '').trim();
     const withPostal = filteredShowrooms.map((s) => ({ ...s, postal: postalFromAddress(s.address) }));
@@ -780,7 +1810,7 @@ export default function App() {
     const averageCenter = (list) => {
       if (!list.length) return null;
       const points = list
-        .map((x) => ({ lat: Number(x.lat), lng: Number(x.lng) }))
+        .map((x) => ({ lat: parseCoordinateNumber(x.lat), lng: parseCoordinateNumber(x.lng) }))
         .filter((x) => !Number.isNaN(x.lat) && !Number.isNaN(x.lng));
       if (!points.length) return null;
       const lat = points.reduce((a, b) => a + b.lat, 0) / points.length;
@@ -799,7 +1829,7 @@ export default function App() {
       if (c2) return c2;
     }
     return averageCenter(withPostal);
-  }, [filteredShowrooms, showroomPostal]);
+  }, [filteredShowrooms, showroomPostal, userLocation]);
 
   const smartShowrooms = useMemo(() => {
     const postal = String(showroomPostal || '').trim();
@@ -824,7 +1854,10 @@ export default function App() {
 
         let dist = null;
         if (showroomTarget) {
-          dist = haversineKm(showroomTarget.lat, showroomTarget.lng, s.lat, s.lng);
+          const routed = routeDistanceKmByShowroom[showroomKey(s)];
+          dist = Number.isFinite(routed)
+            ? routed
+            : haversineKm(showroomTarget.lat, showroomTarget.lng, s.lat, s.lng);
           if (dist !== null) {
             const distanceBonus = Math.max(0, 24 - dist * 2.1);
             score += distanceBonus;
@@ -845,7 +1878,17 @@ export default function App() {
         };
       })
       .sort((a, b) => b.matchScore - a.matchScore || Number(a.smartDistanceKm || 0) - Number(b.smartDistanceKm || 0));
-  }, [filteredShowrooms, province, showroomPostal, showroomTarget, showroomModelPref]);
+  }, [filteredShowrooms, province, routeDistanceKmByShowroom, showroomKey, showroomModelPref, showroomPostal, showroomTarget]);
+
+  useEffect(() => {
+    if (!smartShowrooms.length) {
+      setSelectedShowroom(null);
+      return;
+    }
+    if (!selectedShowroom) return;
+    const found = smartShowrooms.some((s) => String(s.id) === String(selectedShowroom.id));
+    if (!found) setSelectedShowroom(smartShowrooms[0]);
+  }, [selectedShowroom, smartShowrooms]);
 
   const selectedModelVariants = useMemo(() => {
     if (!selectedCar?.model) return [];
@@ -954,8 +1997,11 @@ export default function App() {
     if (!selectedCar) return [];
     const model = normModelName(selectedCar.model);
     return publicPromotions.filter((p) => {
-      if (p.variant_key && selectedVariantKey) return p.variant_key === selectedVariantKey;
-      if (p.model_name) return normModelName(p.model_name) === model;
+      const promoVariantKey = String(p.variant_key || '').trim();
+      const selectedKey = String(selectedVariantKey || '').trim();
+
+      if (promoVariantKey && selectedKey && promoVariantKey === selectedKey) return true;
+      if (p.model_name && normModelName(p.model_name) === model) return true;
       return false;
     });
   }, [publicPromotions, selectedCar, selectedVariantKey]);
@@ -1031,7 +2077,7 @@ export default function App() {
     return { min: Math.min(...prices), max: Math.max(...prices) };
   }, [models]);
 
-  const defaultPriceValue = Math.round((modelPriceBounds.min + modelPriceBounds.max) / 2);
+  const defaultPriceValue = modelPriceBounds.max;
   const modelPriceValue = priceToNumber(modelFilters.maxPrice || defaultPriceValue);
   const priceSpan = Math.max(modelPriceBounds.max - modelPriceBounds.min, 1);
   const pricePercent = Math.min(
@@ -1048,9 +2094,19 @@ export default function App() {
       const haystack = `${modelName} ${variantName}`.trim();
       const priceNum = priceToNumber(m.price || '');
       const modelColors = collectModelColors(m, variantRows);
+      const fuelValue = String(m.fuel || '').toLowerCase();
 
       if (search && !haystack.includes(search)) return false;
-      if (modelFilters.fuel !== 'All' && m.fuel !== modelFilters.fuel) return false;
+      if (modelFilters.fuel !== 'All') {
+        const selectedFuel = String(modelFilters.fuel || '').toLowerCase();
+        if (selectedFuel === 'hybrid') {
+          if (!(fuelValue.includes('hybrid') || fuelValue.includes('plug-in hybrid') || fuelValue.includes('phev'))) {
+            return false;
+          }
+        } else if (m.fuel !== modelFilters.fuel) {
+          return false;
+        }
+      }
       if (modelFilters.seats !== 'All' && String(m.seats || '').replace('.0', '') !== modelFilters.seats) return false;
       if (modelFilters.bodyType !== 'All' && m.bodyType !== modelFilters.bodyType) return false;
       if (maxPrice && !Number.isNaN(priceNum) && priceNum > maxPrice) return false;
@@ -1086,6 +2142,24 @@ export default function App() {
       .catch(() => {});
   };
 
+  const refreshPublicCarOfMonth = () => {
+    return fetch(`${API_BASE}/public/car-of-the-month`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Request failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => {
+        setPublicCarOfMonth(d.cars || []);
+        setCarOfMonthScope(d.scope || 'monthly');
+        setCarOfMonthPeriod(d.period || '');
+        setCarOfMonthError('');
+      })
+      .catch((err) => {
+        setPublicCarOfMonth([]);
+        setCarOfMonthError(err?.message || 'Unable to load car of the month.');
+      });
+  };
+
   const refreshAdminPromotions = () => {
     if (!token) return;
     fetch(`${API_BASE}/admin/promotions`, {
@@ -1106,6 +2180,28 @@ export default function App() {
       .catch(() => {});
   };
 
+  const refreshAdminAnalyticsRange = useCallback(() => {
+    if (!token) return;
+    const params = new URLSearchParams();
+    if (analyticsRange.start_date) params.set('start_date', analyticsRange.start_date);
+    if (analyticsRange.end_date) params.set('end_date', analyticsRange.end_date);
+    if (analyticsRange.granularity) params.set('granularity', analyticsRange.granularity);
+    if (analyticsRange.top_n) params.set('top_n', String(analyticsRange.top_n));
+
+    setAdminAnalyticsRangeLoading(true);
+    setAdminAnalyticsRangeError('');
+    fetch(`${API_BASE}/admin/analytics?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`Request failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => setAdminAnalyticsRangeData(d))
+      .catch((err) => setAdminAnalyticsRangeError(err?.message || 'Unable to load range analytics.'))
+      .finally(() => setAdminAnalyticsRangeLoading(false));
+  }, [token, analyticsRange]);
+
   const resetModelFilters = () => {
     setModelFilters({
       search: '',
@@ -1121,11 +2217,7 @@ export default function App() {
   useEffect(() => {
     refreshPublicPromotions();
     refreshPublicBestSellers();
-
-    fetch(`${API_BASE}/public/admin-models`)
-      .then((r) => r.json())
-      .then((d) => setPublicAdminModels(d.models || []))
-      .catch(() => {});
+    refreshPublicCarOfMonth();
   }, []);
 
   useEffect(() => {
@@ -1141,6 +2233,7 @@ export default function App() {
         setCurrentUser(data.user);
         setAnswers(data.profile?.quiz_answers || {});
         setSavedCars((data.saved_models || []).map((x) => hydrateSavedCar(x, variantByKey, modelByName)));
+        refreshPublicCarOfMonth();
       })
       .catch(() => {
         localStorage.removeItem('mgnition_token');
@@ -1149,6 +2242,11 @@ export default function App() {
         setSavedCars([]);
       });
   }, [token, variantByKey, modelByName]);
+
+  useEffect(() => {
+    if (page !== 'home') return;
+    refreshPublicCarOfMonth();
+  }, [page]);
 
   useEffect(() => {
     if (page !== 'admin' || !token || !currentUser?.is_admin) return;
@@ -1166,9 +2264,21 @@ export default function App() {
       .then((d) => setAdminBookings(d.bookings || []))
       .catch(() => {});
 
+    fetch(`${API_BASE}/admin/users`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => r.json())
+      .then((d) => setAdminUsers(d.users || []))
+      .catch(() => {});
+
     refreshAdminPromotions();
     refreshAdminBestSellers();
   }, [page, token, currentUser]);
+
+  useEffect(() => {
+    if (page !== 'admin' || adminSection !== 'analytics' || !token || !currentUser?.is_admin) return;
+    refreshAdminAnalyticsRange();
+  }, [page, adminSection, token, currentUser, refreshAdminAnalyticsRange]);
 
   useEffect(() => {
     if (page === 'onboarding') setOnboardingStep(0);
@@ -1205,6 +2315,30 @@ export default function App() {
       return next;
     });
   };
+
+  const scrollToHomeSlide = useCallback((index) => {
+    const slider = homeSliderRef.current;
+    if (!slider) return;
+    const clampedIndex = Math.max(0, Math.min(index, 1));
+    slider.scrollTo({ left: clampedIndex * slider.clientWidth, behavior: 'smooth' });
+  }, []);
+
+  const scrollToHomeContent = useCallback(() => {
+    scrollToHomeSlide(1);
+  }, [scrollToHomeSlide]);
+
+  const handleHomeSliderScroll = useCallback((event) => {
+    const slider = event.currentTarget;
+    const width = slider.clientWidth || 1;
+    const nextIndex = Math.round(slider.scrollLeft / width);
+    setHomeSlideIndex((prev) => (prev === nextIndex ? prev : nextIndex));
+  }, []);
+
+  useEffect(() => {
+    if (page !== 'home') return;
+    setHomeSlideIndex(0);
+    requestAnimationFrame(() => scrollToHomeSlide(0));
+  }, [page, scrollToHomeSlide]);
 
   const onNav = (item) => {
     setActiveNav(item);
@@ -1264,7 +2398,8 @@ export default function App() {
     return out.slice(0, minCount);
   };
 
-  const onGetResults = async (targetPage = 'results') => {
+  const onGetResults = async (targetPage = 'results', options = {}) => {
+    const { silent = false, persistProfile = true } = options;
     setLoading(true);
     setRecommendError('');
     try {
@@ -1284,7 +2419,7 @@ export default function App() {
               .filter(Boolean),
       };
 
-      if (token) {
+      if (token && persistProfile) {
         await fetch(`${API_BASE}/profile`, {
           method: 'PUT',
           headers: {
@@ -1314,22 +2449,37 @@ export default function App() {
         setRecommendError(data.message || 'No matching cars found for your current preferences.');
         return;
       }
-      const base = mapped.length ? mapped : getFilteredLocalResults();
-      const fallbackPool = [
-        ...getFilteredLocalResults(),
-        ...(bestSellerCars || []),
-        ...(models || [])
-      ];
-      setResults(ensureMinResults(base, fallbackPool, 3));
+      const constrainedLocal = getFilteredLocalResults();
+      const base = mapped.length ? mapped : constrainedLocal;
+      // Do not inject unrelated models from global pools; keep fallback constrained.
+      const merged = ensureMinResults(base, constrainedLocal, 3);
+      setResults(merged.length ? merged : base);
     } catch (err) {
       setResults([]);
       setRecommendError(err?.message || 'Recommendation engine unavailable.');
     } finally {
       setLoading(false);
-      setActiveNav(targetPage === 'home' ? 'Home' : 'Recommended Cars');
-      setPage(targetPage);
+      if (!silent) {
+        setActiveNav(targetPage === 'home' ? 'Home' : 'Recommended Cars');
+        setPage(targetPage);
+      }
     }
   };
+
+  useEffect(() => {
+    autoHydrateRecommendationsRef.current = false;
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || isAdmin || !hasCompletedQuiz) return;
+    if (results.length > 0) {
+      autoHydrateRecommendationsRef.current = true;
+      return;
+    }
+    if (loading || autoHydrateRecommendationsRef.current) return;
+    autoHydrateRecommendationsRef.current = true;
+    onGetResults('home', { silent: true, persistProfile: false });
+  }, [token, isAdmin, hasCompletedQuiz, results.length, loading]);
 
   const handleAddBestSeller = async (e) => {
     e.preventDefault();
@@ -1443,7 +2593,7 @@ export default function App() {
       setOnboardingStep((s) => s + 1);
       return;
     }
-    await onGetResults('home');
+    await onGetResults('results');
   };
 
   const handleSignup = async (e) => {
@@ -1564,9 +2714,59 @@ export default function App() {
     setToken('');
     setCurrentUser(null);
     setSavedCars([]);
+    setAdminUsers([]);
     setAnswers({});
-    setPage('landing');
-    setActiveNav('');
+    setProfileMessage('');
+    setProfileError('');
+    setPage('home');
+    setActiveNav('Home');
+    setPageHistory(['home']);
+    setHomeSlideIndex(0);
+  };
+
+  const handleProfileUpdate = async (e) => {
+    e.preventDefault();
+    if (!token) return;
+    setProfileError('');
+    setProfileMessage('');
+    setProfileLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          full_name: profileForm.full_name,
+          phone: profileForm.phone,
+          email: profileForm.email,
+          quiz_answers: answers
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update profile.');
+      if (data.user) {
+        setCurrentUser(data.user);
+      }
+      setProfileMessage(data.message || 'Profile updated.');
+      if (currentUser?.is_admin) {
+        setAdminUsers((prev) =>
+          prev.map((row) => (row.id === data.user?.id ? { ...row, ...data.user, is_admin: data.user?.is_admin ? 1 : 0 } : row))
+        );
+      }
+      setAdminBookings((prev) =>
+        prev.map((row) =>
+          row.user_id === data.user?.id
+            ? { ...row, user_name: data.user?.full_name || row.user_name, user_email: data.user?.email || row.user_email, user_phone: data.user?.phone || row.user_phone }
+            : row
+        )
+      );
+    } catch (err) {
+      setProfileError(err.message);
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   const handleAddPromotion = async (e) => {
@@ -1603,8 +2803,50 @@ export default function App() {
       start_date: '',
       end_date: ''
     });
+    setPromoImageName('');
+    if (promoImageInputRef.current) promoImageInputRef.current.value = '';
     refreshPublicPromotions();
     refreshAdminPromotions();
+  };
+
+  const handlePromotionImageUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!String(file.type || '').startsWith('image/')) {
+      setAdminMessage('Please select an image file (PNG, JPG, WEBP).');
+      event.target.value = '';
+      return;
+    }
+
+    const maxBytes = 3 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setAdminMessage('Image is too large. Please use a file under 3 MB.');
+      event.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = typeof reader.result === 'string' ? reader.result : '';
+      if (!base64) {
+        setAdminMessage('Could not read image file.');
+        return;
+      }
+      setPromoForm((prev) => ({ ...prev, image_url: base64 }));
+      setPromoImageName(file.name);
+      setAdminMessage(`Image selected: ${file.name}`);
+    };
+    reader.onerror = () => {
+      setAdminMessage('Failed to read image file.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearPromotionImage = () => {
+    setPromoForm((prev) => ({ ...prev, image_url: '' }));
+    setPromoImageName('');
+    if (promoImageInputRef.current) promoImageInputRef.current.value = '';
   };
 
   const handleDeletePromotion = async (promoId) => {
@@ -1641,43 +2883,6 @@ export default function App() {
     }
   };
 
-  const handleAddAdminModel = async (e) => {
-    e.preventDefault();
-    setAdminMessage('');
-    const res = await fetch(`${API_BASE}/admin/models`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(adminModelForm)
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setAdminMessage(data.error || 'Failed to add model.');
-      return;
-    }
-    setAdminMessage('Model added successfully.');
-    setAdminModelForm({
-      model: '',
-      variant: '',
-      year: '',
-      price_thb: '',
-      fuel_type: '',
-      seats: '',
-      body_type: '',
-      horsepower_hp: '',
-      torque_nm: '',
-      range_km: '',
-      cargo_liters: '',
-      image_url: ''
-    });
-    fetch(`${API_BASE}/public/admin-models`)
-      .then((r) => r.json())
-      .then((d) => setPublicAdminModels(d.models || []))
-      .catch(() => {});
-  };
-
   const handleSaveModel = async (car, options = {}) => {
     if (!token) {
       setAuthMode('login');
@@ -1696,6 +2901,7 @@ export default function App() {
     const data = await res.json();
     if (res.ok) {
       setSavedCars((data.saved_models || []).map((x) => hydrateSavedCar(x, variantByKey, modelByName)));
+      refreshPublicCarOfMonth();
       if (!options.silent) {
         setActiveNav('Saved Results');
         setPage('saved');
@@ -1712,7 +2918,9 @@ export default function App() {
     await handleSaveModel(car, { silent: true });
   };
 
-  const handleViewDetails = async (car) => {
+  const handleViewDetails = async (car, options = {}) => {
+    const fromRecommendation = options?.source === 'recommended';
+    setDetailFromRecommendation(fromRecommendation);
     const fallback =
       resultReasonMap.get(car?.variant_key || '') ||
       resultReasonMap.get(String(car?.model || '').toLowerCase()) ||
@@ -1744,6 +2952,56 @@ export default function App() {
     }).catch(() => {});
   };
 
+  const handleRateRecommendation = async (ratingValue) => {
+    const rating = Number(ratingValue);
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) return;
+    if (!token) {
+      setAuthMode('login');
+      setPage('auth');
+      setAuthError('Please sign in to submit recommendation ratings.');
+      return;
+    }
+
+    const fallbackVariant = selectedDetailVariantForCompare || selectedCar;
+    const variantKey =
+      selectedVariantKey ||
+      fallbackVariant?.variant_key ||
+      `${fallbackVariant?.model || ''}|${fallbackVariant?.variant || ''}|${fallbackVariant?.year || ''}`;
+    if (!variantKey) {
+      setDetailRatingError('Unable to submit rating for this car.');
+      return;
+    }
+
+    setDetailRatingLoading(true);
+    setDetailRatingError('');
+    setDetailRatingMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/feedback/rating`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          variant_key: variantKey,
+          model: fallbackVariant?.model || '',
+          variant: fallbackVariant?.variant || '',
+          year: fallbackVariant?.year || '',
+          rating,
+          source: 'details'
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Unable to submit rating.');
+      setDetailRating(rating);
+      setDetailRatingMessage('Thanks. Your rating is now used to improve future recommendations.');
+    } catch (err) {
+      setDetailRatingError(err?.message || 'Unable to submit rating.');
+    } finally {
+      setDetailRatingLoading(false);
+    }
+  };
+
   const handleRemoveSaved = async (variantKey) => {
     if (!token) return;
     const encoded = encodeURIComponent(variantKey);
@@ -1752,7 +3010,10 @@ export default function App() {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
-    if (res.ok) setSavedCars((data.saved_models || []).map((x) => hydrateSavedCar(x, variantByKey, modelByName)));
+    if (res.ok) {
+      setSavedCars((data.saved_models || []).map((x) => hydrateSavedCar(x, variantByKey, modelByName)));
+      refreshPublicCarOfMonth();
+    }
   };
 
   const handleAddToCompare = (car) => {
@@ -1829,7 +3090,9 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Booking failed.');
+      const bookingRow = data.booking || {};
       const snapshot = {
+        booking_reference: bookingRow.booking_reference || '',
         showroom: activeShowroom.name,
         province,
         model: bookingForm.model,
@@ -1838,7 +3101,11 @@ export default function App() {
         confirmedAt: new Date().toISOString()
       };
       setConfirmedBooking(snapshot);
-      setBookingMessage(wasConfirmed ? 'Booking updated. Admin can now see the latest details.' : 'Booking confirmed. Admin can now see this booking.');
+      setBookingMessage(
+        wasConfirmed
+          ? `Booking updated${bookingRow.booking_reference ? ` (${bookingRow.booking_reference})` : ''}.`
+          : `Booking confirmed${bookingRow.booking_reference ? ` (${bookingRow.booking_reference})` : ''}.`
+      );
       setPage('booking');
     } catch (err) {
       setBookingError(err.message);
@@ -1847,7 +3114,16 @@ export default function App() {
     }
   };
 
-  const homeRecommendations = (results.length ? results : getFilteredLocalResults()).slice(0, 3);
+  const homeRecommendations = results.slice(0, 3);
+  const recommendationHeader = useMemo(() => buildRecommendationHeader(results), [results]);
+  const carOfMonthPeriodLabel = useMemo(() => {
+    if (!carOfMonthPeriod) return 'this month';
+    const [y, m] = String(carOfMonthPeriod).split('-');
+    const idx = Number(m) - 1;
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    if (idx >= 0 && idx < months.length && y) return `${months[idx]} ${y}`;
+    return carOfMonthPeriod;
+  }, [carOfMonthPeriod]);
   const landingStats = [
     { label: 'Models', value: modelsData.length },
     { label: 'Variants', value: modelVariantsData.length },
@@ -1859,22 +3135,145 @@ export default function App() {
     bookings: adminBookings.length,
     promos: publicPromotions.length
   };
-  const conversionSegments = adminAnalytics?.conversion_by_quiz_segment || [];
-  const topSavedVariants = adminAnalytics?.top_saved_variants || [];
-  const impressionsTrend = adminAnalytics?.impressions_saves_trend || [];
-  const maxSavedCount = Math.max(1, ...topSavedVariants.map((r) => Number(r.cnt || 0)));
-  const maxConversionRate = Math.max(1, ...conversionSegments.map((r) => Number(r.conversion_rate || 0)));
-  const trendMax = Math.max(
-    1,
-    ...impressionsTrend.map((d) => Math.max(Number(d.impressions || 0), Number(d.saves || 0)))
+  const activeAnalyticsData = adminSection === 'analytics' && adminAnalyticsRangeData ? adminAnalyticsRangeData : adminAnalytics;
+  const topBookedVariants = activeAnalyticsData?.top_booked_variants || [];
+  const impressionsTrend = activeAnalyticsData?.impressions_saves_trend || [];
+  const savedTimeseriesPayload = activeAnalyticsData?.saved_variants_timeseries;
+  const bookedTimeseriesPayload = activeAnalyticsData?.booked_cars_timeseries;
+  const hasSavedTimeseries = Boolean(
+    savedTimeseriesPayload &&
+      Array.isArray(savedTimeseriesPayload.buckets) &&
+      Array.isArray(savedTimeseriesPayload.series)
   );
+  const hasBookedTimeseries = Boolean(
+    bookedTimeseriesPayload &&
+      Array.isArray(bookedTimeseriesPayload.buckets) &&
+      Array.isArray(bookedTimeseriesPayload.series)
+  );
+  const savedVariantTimeBuckets = hasSavedTimeseries ? savedTimeseriesPayload.buckets : [];
+  const savedVariantTimeSeries = hasSavedTimeseries ? savedTimeseriesPayload.series : [];
+  const bookedVariantTimeBuckets = hasBookedTimeseries ? bookedTimeseriesPayload.buckets : [];
+  const bookedVariantTimeSeries = hasBookedTimeseries ? bookedTimeseriesPayload.series : [];
+  const topSavedVariantsAligned = useMemo(() => {
+    if (!hasSavedTimeseries) return [];
+    return savedVariantTimeSeries
+      .map((row) => ({
+        variant_key: row.variant_key,
+        cnt: (Array.isArray(row.counts) ? row.counts : []).reduce((sum, x) => sum + Number(x || 0), 0)
+      }))
+      .sort((a, b) => Number(b.cnt || 0) - Number(a.cnt || 0));
+  }, [hasSavedTimeseries, savedVariantTimeSeries]);
+  const topBookedVariantsAligned = useMemo(() => {
+    if (hasBookedTimeseries) {
+      return bookedVariantTimeSeries
+        .map((row) => ({
+          variant_key: row.variant_key,
+          cnt: (Array.isArray(row.counts) ? row.counts : []).reduce((sum, x) => sum + Number(x || 0), 0)
+        }))
+        .sort((a, b) => Number(b.cnt || 0) - Number(a.cnt || 0));
+    }
+    return topBookedVariants;
+  }, [hasBookedTimeseries, bookedVariantTimeSeries, topBookedVariants]);
+  const maxSavedCount = Math.max(1, ...topSavedVariantsAligned.map((r) => Number(r.cnt || 0)));
+  const maxBookedCount = Math.max(1, ...topBookedVariantsAligned.map((r) => Number(r.cnt || 0)));
   const trendLabel = (d) => (d ? String(d).slice(5) : '');
+  const bookingCountsByDate = useMemo(() => {
+    const out = {};
+    (adminBookings || []).forEach((b) => {
+      const raw = String(b?.created_at || '');
+      const d = raw.slice(0, 10);
+      if (!d || d.length !== 10) return;
+      out[d] = (out[d] || 0) + 1;
+    });
+    return out;
+  }, [adminBookings]);
+  const funnelTrend = useMemo(() => {
+    const map = new Map();
+    (impressionsTrend || []).forEach((row) => {
+      const d = String(row?.date || '').slice(0, 10);
+      if (!d) return;
+      map.set(d, {
+        date: d,
+        impressions: Number(row?.impressions || 0),
+        saves: Number(row?.saves || 0),
+        bookings: 0
+      });
+    });
+    Object.entries(bookingCountsByDate).forEach(([d, cnt]) => {
+      if (!map.has(d)) {
+        map.set(d, { date: d, impressions: 0, saves: 0, bookings: Number(cnt || 0) });
+      } else {
+        map.get(d).bookings = Number(cnt || 0);
+      }
+    });
+    const rows = [...map.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const sliced = rows.length > 14 ? rows.slice(-14) : rows;
+    return sliced.map((r) => ({
+      ...r,
+      save_rate: r.impressions > 0 ? (r.saves / r.impressions) * 100 : 0,
+      booking_rate: r.impressions > 0 ? (r.bookings / r.impressions) * 100 : 0
+    }));
+  }, [impressionsTrend, bookingCountsByDate]);
   const chartWidth = 600;
-  const chartHeight = 180;
-  const chartPad = 18;
-  const chartInnerW = chartWidth - chartPad * 2;
-  const chartInnerH = chartHeight - chartPad * 2;
-  const trendStep = impressionsTrend.length > 1 ? chartInnerW / (impressionsTrend.length - 1) : 0;
+  const chartHeight = 200;
+  const funnelPadLeft = 34;
+  const funnelPadRight = 10;
+  const funnelPadTop = 10;
+  const funnelPadBottom = 22;
+  const funnelInnerW = chartWidth - funnelPadLeft - funnelPadRight;
+  const funnelInnerH = chartHeight - funnelPadTop - funnelPadBottom;
+  const funnelSeries = [
+    { key: 'impressions', label: 'Impressions', color: '#4a4a4a' },
+    { key: 'saves', label: 'Saves', color: '#d71920' },
+    { key: 'bookings', label: 'Bookings', color: '#1d4ed8' }
+  ];
+  const funnelBucketCount = funnelTrend.length;
+  const funnelGroupWidth = funnelBucketCount ? funnelInnerW / funnelBucketCount : 0;
+  const funnelBarGap = 2;
+  const funnelBarWidth =
+    funnelBucketCount && funnelSeries.length
+      ? Math.max(4, (funnelGroupWidth - funnelBarGap * (funnelSeries.length + 1)) / funnelSeries.length)
+      : 0;
+  const funnelMaxCount = Math.max(
+    1,
+    ...funnelTrend.map((r) => Math.max(Number(r.impressions || 0), Number(r.saves || 0), Number(r.bookings || 0)))
+  );
+  const funnelTickMax = Math.ceil(funnelMaxCount);
+  const funnelTickMid = Math.max(1, Math.ceil(funnelTickMax / 2));
+  const funnelYAxisTicks = useMemo(
+    () => [...new Set([0, funnelTickMid, funnelTickMax])].sort((a, b) => a - b),
+    [funnelTickMid, funnelTickMax]
+  );
+  const funnelY = (value) => funnelPadTop + funnelInnerH - (Number(value || 0) / Math.max(1, funnelMaxCount)) * funnelInnerH;
+  const funnelXTicks = useMemo(() => {
+    if (!funnelBucketCount) return [];
+    const mid = Math.floor((funnelBucketCount - 1) / 2);
+    return [...new Set([0, mid, funnelBucketCount - 1])];
+  }, [funnelBucketCount]);
+  const avgSaveRate = funnelTrend.length
+    ? (funnelTrend.reduce((sum, r) => sum + Number(r.save_rate || 0), 0) / funnelTrend.length)
+    : 0;
+  const avgBookingRate = funnelTrend.length
+    ? (funnelTrend.reduce((sum, r) => sum + Number(r.booking_rate || 0), 0) / funnelTrend.length)
+    : 0;
+  const variantBucketCount = savedVariantTimeBuckets.length;
+  const variantSeriesCount = savedVariantTimeSeries.length;
+  const variantPadLeft = 34;
+  const variantPadRight = 10;
+  const variantPadTop = 10;
+  const variantPadBottom = 22;
+  const variantInnerW = chartWidth - variantPadLeft - variantPadRight;
+  const variantInnerH = chartHeight - variantPadTop - variantPadBottom;
+  const variantGroupWidth = variantBucketCount ? variantInnerW / variantBucketCount : 0;
+  const variantBarGap = 2;
+  const variantBarWidth =
+    variantBucketCount && variantSeriesCount
+      ? Math.max(4, (variantGroupWidth - variantBarGap * (variantSeriesCount + 1)) / variantSeriesCount)
+      : 0;
+  const variantTrendMax = Math.max(
+    1,
+    ...savedVariantTimeSeries.flatMap((row) => (Array.isArray(row?.counts) ? row.counts : [])).map((x) => Number(x || 0))
+  );
   const trendLine = (field) =>
     impressionsTrend
       .map((d, idx) => {
@@ -1884,15 +3283,55 @@ export default function App() {
         return `${x},${y}`;
       })
       .join(' ');
-  const trendStart = impressionsTrend[0]?.date;
-  const trendMid = impressionsTrend[Math.floor(impressionsTrend.length / 2)]?.date;
-  const trendEnd = impressionsTrend[impressionsTrend.length - 1]?.date;
+  const variantTickMax = Math.ceil(variantTrendMax);
+  const variantTickMid = Math.max(1, Math.ceil(variantTickMax / 2));
+  const variantYAxisTicks = useMemo(
+    () => [...new Set([0, variantTickMid, variantTickMax])].sort((a, b) => a - b),
+    [variantTickMid, variantTickMax]
+  );
+  const variantY = (value) => variantPadTop + variantInnerH - (Number(value || 0) / Math.max(1, variantTrendMax)) * variantInnerH;
+  const variantXTicks = useMemo(() => {
+    if (!variantBucketCount) return [];
+    const mid = Math.floor((variantBucketCount - 1) / 2);
+    return [...new Set([0, mid, variantBucketCount - 1])];
+  }, [variantBucketCount]);
+  const variantLineColors = ['#d71920', '#111', '#2f6adf', '#2d8a4f', '#d97706', '#7c3aed', '#0f766e', '#9f1239', '#a16207', '#4b5563'];
+  const bookedBucketCount = bookedVariantTimeBuckets.length;
+  const bookedSeriesCount = bookedVariantTimeSeries.length;
+  const bookedPadLeft = 34;
+  const bookedPadRight = 10;
+  const bookedPadTop = 10;
+  const bookedPadBottom = 22;
+  const bookedInnerW = chartWidth - bookedPadLeft - bookedPadRight;
+  const bookedInnerH = chartHeight - bookedPadTop - bookedPadBottom;
+  const bookedGroupWidth = bookedBucketCount ? bookedInnerW / bookedBucketCount : 0;
+  const bookedBarGap = 2;
+  const bookedBarWidth =
+    bookedBucketCount && bookedSeriesCount
+      ? Math.max(4, (bookedGroupWidth - bookedBarGap * (bookedSeriesCount + 1)) / bookedSeriesCount)
+      : 0;
+  const bookedTrendMax = Math.max(
+    1,
+    ...bookedVariantTimeSeries.flatMap((row) => (Array.isArray(row?.counts) ? row.counts : [])).map((x) => Number(x || 0))
+  );
+  const bookedTickMax = Math.ceil(bookedTrendMax);
+  const bookedTickMid = Math.max(1, Math.ceil(bookedTickMax / 2));
+  const bookedYAxisTicks = useMemo(
+    () => [...new Set([0, bookedTickMid, bookedTickMax])].sort((a, b) => a - b),
+    [bookedTickMid, bookedTickMax]
+  );
+  const bookedY = (value) => bookedPadTop + bookedInnerH - (Number(value || 0) / Math.max(1, bookedTrendMax)) * bookedInnerH;
+  const bookedXTicks = useMemo(() => {
+    if (!bookedBucketCount) return [];
+    const mid = Math.floor((bookedBucketCount - 1) / 2);
+    return [...new Set([0, mid, bookedBucketCount - 1])];
+  }, [bookedBucketCount]);
   const adminNavItems = [
     { key: 'overview', label: 'Overview' },
     { key: 'analytics', label: 'Analytics' },
+    { key: 'users', label: 'Users' },
     { key: 'bookings', label: 'Bookings' },
     { key: 'promotions', label: 'Promotions' },
-    { key: 'models', label: 'Models' },
     { key: 'best-sellers', label: 'Best Sellers' }
   ];
 
@@ -1905,76 +3344,171 @@ export default function App() {
           onNav={onNav}
           onAuth={() => setPage('auth')}
           currentUser={currentUser}
+          onProfile={() => {
+            setActiveNav('');
+            setProfileError('');
+            setProfileMessage('');
+            setPage('profile');
+          }}
           onLogout={handleLogout}
         />
       )}
-      {page === 'landing' && (
-        <>
-          <section className="hero" style={{ backgroundImage: `url(${HERO_IMG})` }}>
-            <div className="hero-overlay">
-              <p className="hero-eyebrow">MG Thailand • Elevated Driving Experience</p>
-              <h1>YOUR IDEAL MG, JUST A CLICK AWAY</h1>
-              <p className="hero-subtitle">
-                Discover tailored recommendations, premium promotions, and trusted showrooms with a sleek,
-                data-driven experience inspired by the best in automotive luxury.
-              </p>
-              <div className="hero-actions">
-                <button
-                  className="btn black hero-cta"
-                  onClick={() => {
-                    setActiveNav('Home');
-                    setPage('home');
-                  }}
-                  type="button"
-                >
-                  Get Started
-                </button>
-                <button
-                  className="btn ghost hero-secondary"
-                  onClick={() => {
-                    setActiveNav('Our Models');
-                    setPage('models');
-                  }}
-                  type="button"
-                >
-                  Explore Models
-                </button>
-              </div>
-              <div className="hero-stats">
-                {landingStats.map((stat) => (
-                  <div key={stat.label} className="hero-stat">
-                    <strong>{stat.value}</strong>
-                    <span>{stat.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="hero-sheen" />
-          </section>
-        </>
-      )}
-
       {page === 'home' && (
-        <>
-          <section className="page-section" id="home-content">
-            {!isGuest && hasQuizAnswers && (
-              <>
-                <div className="home-section-head">
-                  <h1>Recommended Cars</h1>
-                  <h2>Best Matches Based On Your Preferences</h2>
-                  {token && hasQuizAnswers && (
-                    <button className="btn light" type="button" onClick={() => setPage('onboarding')}>
-                      Update Preferences
-                    </button>
-                  )}
-                  {!token && (
-                    <button className="btn light" type="button" onClick={() => { setAuthMode('signup'); setPage('auth'); }}>
-                      Sign up to personalize recommendations
-                    </button>
-                  )}
+        <div className="home-slider-shell">
+          <div className="home-slider-track" ref={homeSliderRef} onScroll={handleHomeSliderScroll}>
+            <section className="hero home-slide hero-slide" style={{ backgroundImage: `url(${HERO_IMG})` }}>
+              <div className="hero-overlay">
+                <p className="hero-eyebrow">MG Thailand • Elevated Driving Experience</p>
+                <h1>YOUR IDEAL MG, JUST A CLICK AWAY</h1>
+                <p className="hero-subtitle">
+                  Discover tailored recommendations, premium promotions, and trusted showrooms with a sleek,
+                  data-driven experience inspired by the best in automotive luxury.
+                </p>
+                <div className="hero-actions">
+                  <button
+                    className="btn black hero-cta"
+                    onClick={scrollToHomeContent}
+                    type="button"
+                  >
+                    Get Started
+                  </button>
+                  <button
+                    className="btn ghost hero-secondary"
+                    onClick={() => {
+                      setActiveNav('Our Models');
+                      setPage('models');
+                    }}
+                    type="button"
+                  >
+                    Explore Models
+                  </button>
                 </div>
-                <div className="cards three">
-                  {(homeRecommendations.length ? homeRecommendations : bestSellerCars).map((car) => (
+                <div className="hero-stats">
+                  {landingStats.map((stat) => (
+                    <div key={stat.label} className="hero-stat">
+                      <strong>{stat.value}</strong>
+                      <span>{stat.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="hero-sheen" />
+            </section>
+
+            <section className="page-section home-content-section home-slide home-content-slide" id="home-content">
+              <div className="right-content">
+                <h2>
+                  Pro<span>motion</span>
+                </h2>
+                {publicPromotions.length ? (
+                  <div className="home-promo-row">
+                    {publicPromotions.map((promo) => (
+                      <article key={promo.id} className="home-promo-card">
+                        <img src={resolvePromotionImage(promo)} alt={promo.title} />
+                        <div className="home-promo-copy">
+                          <h3>{promo.price_text || promo.title}</h3>
+                          <p className="home-promo-desc">{promo.description || 'Limited-time offer from MGNITION'}</p>
+                          <p className="home-promo-badge">{promo.badge_text || 'Limited Promotion'}</p>
+                          {(promo.start_date || promo.end_date) && (
+                            <p className="home-promo-date">
+                              {promo.start_date || 'Now'} - {promo.end_date || 'Until stocks last'}
+                            </p>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-text">No active promotions right now.</p>
+                )}
+              </div>
+
+              <div className="right-content car-of-month-block">
+                <h2>
+                  Car Of <span>The Month</span>
+                </h2>
+                <p className="muted-text">
+                  {carOfMonthScope === 'monthly'
+                    ? `Most saved by users in ${carOfMonthPeriodLabel}.`
+                    : `No saves in ${carOfMonthPeriodLabel} yet. Showing all-time most saved cars.`}
+                </p>
+                {!!carOfMonthError && <p className="auth-error">Car of the month unavailable: {carOfMonthError}</p>}
+                {carOfMonthCars.length ? (
+                  <div className="cards best-seller-row">
+                    {carOfMonthCars.map((car) => (
+                      <CarCard
+                        key={`car-of-month-${savedCarKey(car)}`}
+                        car={car}
+                        onView={handleViewDetails}
+                        onCompare={isGuest ? null : handleAddToCompare}
+                        onSave={isGuest ? null : handleToggleSave}
+                        isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-text">No user saves yet.</p>
+                )}
+              </div>
+
+              {!isGuest && hasCompletedQuiz && (
+                <>
+                  <div className="home-section-head">
+                    <div className="recommend-head-top">
+                      <div className="recommend-head-copy">
+                        <h1 className="recommend-title">{recommendationHeader.title}</h1>
+                        <p className="recommend-subtitle">{recommendationHeader.reason}</p>
+                      </div>
+                    </div>
+                    {recommendError && <p className="auth-error">{recommendError}</p>}
+                    {!!noMatchSuggestions.length && (
+                      <ul className="constraint-help-list">
+                        {noMatchSuggestions.map((hint) => (
+                          <li key={`home-hint-${hint}`}>{hint}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {!token && (
+                      <button className="btn light" type="button" onClick={() => { setAuthMode('signup'); setPage('auth'); }}>
+                        Sign up to personalize recommendations
+                      </button>
+                    )}
+                  </div>
+                  <div className="cards three">
+                    {homeRecommendations.map((car) => (
+                      <CarCard
+                        key={savedCarKey(car)}
+                        car={car}
+                        onView={(value) => handleViewDetails(value, { source: 'recommended' })}
+                        onCompare={isGuest ? null : handleAddToCompare}
+                        onSave={isGuest ? null : handleToggleSave}
+                        isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
+                      />
+                    ))}
+                  </div>
+                  {!recommendError && !homeRecommendations.length && (
+                    <p className="muted-text">No recommendations yet. Complete or update the quiz to generate results.</p>
+                  )}
+                </>
+              )}
+              {!isGuest && !isAdmin && !hasCompletedQuiz && (
+                <div className="quiz-banner">
+                  <div>
+                    <h3>Personalized Recommendations</h3>
+                    <p>Take the quiz to unlock your best matches.</p>
+                  </div>
+                  <button className="btn light" type="button" onClick={() => setPage('onboarding')}>
+                    Start Quiz
+                  </button>
+                </div>
+              )}
+
+              <div className="right-content best-sellers-block">
+                <h2>
+                  Best <span>sellers</span>
+                </h2>
+                <div className="cards best-seller-row">
+                  {bestSellerCars.map((car) => (
                     <CarCard
                       key={savedCarKey(car)}
                       car={car}
@@ -1985,64 +3519,22 @@ export default function App() {
                     />
                   ))}
                 </div>
-              </>
-            )}
-            {!isGuest && !isAdmin && !hasQuizAnswers && (
-              <div className="quiz-banner">
-                <div>
-                  <h3>Personalized Recommendations</h3>
-                  <p>Take the quiz to unlock your best matches.</p>
-                </div>
-                <button className="btn light" type="button" onClick={() => setPage('onboarding')}>
-                  Start Quiz
-                </button>
               </div>
-            )}
+            </section>
+          </div>
 
-            <div className="right-content best-sellers-block">
-              <h2>
-                Best <span>sellers</span>
-              </h2>
-              <div className="cards best-seller-row">
-                {bestSellerCars.map((car) => (
-                  <CarCard
-                    key={savedCarKey(car)}
-                    car={car}
-                    onView={handleViewDetails}
-                    onCompare={isGuest ? null : handleAddToCompare}
-                    onSave={isGuest ? null : handleToggleSave}
-                    isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="right-content">
-              <h2>
-                Pro<span>motion</span>
-              </h2>
-              {publicPromotions.length ? (
-                publicPromotions.map((promo) => (
-                  <div key={promo.id} className="promo-card">
-                    <img src={resolvePromotionImage(promo)} alt={promo.title} />
-                    <div>
-                      <h3>{promo.price_text || promo.title}</h3>
-                      <p>{promo.description || 'Limited-time offer from MGNITION'}</p>
-                      <p>{promo.badge_text || 'Limited Promotion'}</p>
-                      {(promo.start_date || promo.end_date) && (
-                        <p>
-                          {promo.start_date || 'Now'} - {promo.end_date || 'Until stocks last'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="muted-text">No active promotions right now.</p>
-              )}
-            </div>
-          </section>
-        </>
+          <div className={homeSlideIndex === 1 ? 'home-slider-dots hidden' : 'home-slider-dots'} aria-label="Home sections">
+            {[0, 1].map((idx) => (
+              <button
+                key={`home-dot-${idx}`}
+                type="button"
+                aria-label={idx === 0 ? 'Hero section' : 'Recommendations section'}
+                className={homeSlideIndex === idx ? 'slider-dot active' : 'slider-dot'}
+                onClick={() => scrollToHomeSlide(idx)}
+              />
+            ))}
+          </div>
+        </div>
       )}
 
       {page === 'onboarding' && (
@@ -2087,6 +3579,7 @@ export default function App() {
                 {(currentQuestion.type === 'single' || currentQuestion.type === 'multi') && (
                   <div className="quiz-options-grid">
                     {currentQuestion.options.map((option) => {
+                      const disabled = isOnboardingOptionDisabled(currentQuestion.key, option);
                       const selected =
                         currentQuestion.type === 'multi'
                           ? (Array.isArray(answers[currentQuestion.key]) && answers[currentQuestion.key].includes(option))
@@ -2095,8 +3588,14 @@ export default function App() {
                         <button
                           key={option}
                           type="button"
-                          className={selected ? 'quiz-option selected' : 'quiz-option'}
+                          className={
+                            selected ? `quiz-option selected${disabled ? ' disabled' : ''}` : `quiz-option${disabled ? ' disabled' : ''}`
+                          }
+                          disabled={disabled}
                           onClick={() =>
+                            disabled
+                              ? null
+                              :
                             currentQuestion.type === 'multi'
                               ? toggleMultiAnswer(currentQuestion.key, option)
                               : setSingleAnswer(currentQuestion.key, option)
@@ -2108,6 +3607,13 @@ export default function App() {
                       );
                     })}
                   </div>
+                )}
+                {!!onboardingConstraintNotes.length && (
+                  <ul className="constraint-help-list onboarding-help">
+                    {onboardingConstraintNotes.map((hint) => (
+                      <li key={`quiz-hint-${hint}`}>{hint}</li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}
@@ -2127,10 +3633,12 @@ export default function App() {
 
       {page === 'results' && (
         <section className="page-section">
-          <h1>Recommended Cars</h1>
-          <h2>Best Matches Based On Your Preferences</h2>
-          {hasQuizAnswers ? (
-            <>
+          <div className="recommend-head-top">
+            <div className="recommend-head-copy">
+              <h1 className="recommend-title">{recommendationHeader.title}</h1>
+              <p className="recommend-subtitle">{recommendationHeader.reason}</p>
+            </div>
+            {hasCompletedQuiz && (
               <button
                 className="btn light"
                 type="button"
@@ -2141,19 +3649,33 @@ export default function App() {
               >
                 Update Preferences
               </button>
+            )}
+          </div>
+          {hasCompletedQuiz ? (
+            <>
               {recommendError && <p className="auth-error">{recommendError}</p>}
+              {!!noMatchSuggestions.length && (
+                <ul className="constraint-help-list">
+                  {noMatchSuggestions.map((hint) => (
+                    <li key={`results-hint-${hint}`}>{hint}</li>
+                  ))}
+                </ul>
+              )}
               <div className="cards three">
-                {(recommendError ? [] : (results.length ? results : bestSellerCars)).slice(0, 3).map((car) => (
+                {(recommendError ? [] : results).slice(0, 3).map((car) => (
                   <CarCard
                     key={savedCarKey(car)}
                     car={car}
-                    onView={handleViewDetails}
+                    onView={(value) => handleViewDetails(value, { source: 'recommended' })}
                     onCompare={isGuest ? null : handleAddToCompare}
                     onSave={isGuest ? null : handleToggleSave}
                     isSaved={savedKeySet.has(car.variant_key) || savedKeySet.has(String(car.model || '').toLowerCase())}
                   />
                 ))}
               </div>
+              {!recommendError && !results.length && (
+                <p className="muted-text">No recommendations yet. Complete or update the quiz to generate results.</p>
+              )}
             </>
           ) : (
             <div className="auth-box" style={{ maxWidth: 520 }}>
@@ -2366,10 +3888,9 @@ export default function App() {
                 }}
               >
                 <img src={modelImage(car)} alt={car.model} />
-                <div>
+                <div className="model-list-content">
                   <strong>{car.model}</strong>
-                  <span>Starting price {car.price}</span>
-                  {car.variant && <span>Variant: {car.variant}</span>}
+                  <span>{modelPriceLabel(car.price)}</span>
                 </div>
               </button>
             ))}
@@ -2394,7 +3915,7 @@ export default function App() {
             <p><b>Available Variants:</b> {selectedModelVariants.length || 'N/A'}</p>
           </div>
 
-          {(() => {
+          {detailFromRecommendation && (() => {
             const explicitTopReasons = selectedCar.explanation?.top_reasons || [];
             const explicitMoreReasons = selectedCar.explanation?.more_reasons || [];
             const fallbackReasons = buildQuizReasons(answers, selectedCar);
@@ -2433,6 +3954,28 @@ export default function App() {
               )
             );
           })()}
+
+          {detailFromRecommendation && !isGuest && (
+            <article className="detail-rating-box">
+              <h3>How well does this recommendation fit your needs?</h3>
+              <div className="detail-rating-actions">
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <button
+                    key={`rate-${value}`}
+                    type="button"
+                    className={detailRating === value ? 'detail-rating-btn active' : 'detail-rating-btn'}
+                    onClick={() => handleRateRecommendation(value)}
+                    disabled={detailRatingLoading}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+              <p className="muted-text">1 = poor fit, 5 = excellent fit.</p>
+              {detailRatingError && <p className="auth-error">{detailRatingError}</p>}
+              {detailRatingMessage && <p className="auth-ok">{detailRatingMessage}</p>}
+            </article>
+          )}
 
           {!!detailPromotions.length && (
             <div className="detail-promotions">
@@ -2822,9 +4365,21 @@ export default function App() {
               >
                 Find Showroom
               </button>
+              <button
+                className="btn light"
+                onClick={handleUseCurrentLocation}
+                type="button"
+                disabled={showroomGeoLoading}
+              >
+                {showroomGeoLoading ? 'Locating...' : 'Use My Location'}
+              </button>
               <span className="showroom-meta">
                 {smartShowrooms.length} showroom{smartShowrooms.length === 1 ? '' : 's'} found in {province}
               </span>
+              {userLocation && (
+                <span className="showroom-meta">Using your exact location for distance ranking</span>
+              )}
+              {showroomGeoError && <span className="showroom-geo-error">{showroomGeoError}</span>}
             </div>
           </div>
 
@@ -2862,7 +4417,8 @@ export default function App() {
                     {!isGuest && !isAdmin && (
                       <button
                         className="btn black"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedShowroom(s);
                           setPage('booking');
                         }}
@@ -2880,13 +4436,30 @@ export default function App() {
       )}
 
       {page === 'map' && (
-        <section className="map-page">
-          <iframe title="map" src="https://www.openstreetmap.org/export/embed.html?bbox=99.8%2C13.3%2C100.9%2C14.2&layer=mapnik" />
+        <section className="map-page" ref={mapSectionRef}>
+          <ShowroomGoogleMap
+            showrooms={smartShowrooms}
+            selectedShowroom={selectedShowroom}
+            userLocation={userLocation}
+            onSelectShowroom={setSelectedShowroom}
+          />
           <div className="showroom-list-wrap">
             <h3>Showrooms in {province}</h3>
             <div className="showroom-list">
               {smartShowrooms.map((s) => (
-                <article key={s.id} className="showroom-card">
+                <article
+                  key={s.id}
+                  className={`showroom-card showroom-card-clickable ${selectedShowroomKey === showroomKey(s) ? 'showroom-card-selected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => focusShowroomOnMap(s, true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      focusShowroomOnMap(s, true);
+                    }
+                  }}
+                >
                   <div className="showroom-card-head">
                     <h4>{s.name}</h4>
                     <span>{s.smartDistanceKm || '-'} KM</span>
@@ -2896,14 +4469,16 @@ export default function App() {
                   <p>Postal Code: {postalFromAddress(s.address) || '-'}</p>
                   <p>Phone: {s.phone || '-'}</p>
                   <div className="showroom-actions">
-                    <a
+                    <button
                       className="btn light"
-                      href={`https://www.google.com/maps?q=${s.lat},${s.lng}`}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        focusShowroomOnMap(s, true);
+                      }}
+                      type="button"
                     >
                       View Map
-                    </a>
+                    </button>
                     {!isGuest && !isAdmin && (
                       <button
                         className="btn black"
@@ -2931,6 +4506,7 @@ export default function App() {
             const showroomName = selectedShowroom?.name || smartShowrooms[0]?.name || filteredShowrooms[0]?.name || '';
             const variantLabel = bookingVariantOptions.find((v) => v.key === bookingForm.variant_key)?.label || 'Any variant';
             const summaryItems = [
+              { key: 'booking_reference', label: 'Booking ID', value: confirmedBooking?.booking_reference || 'Will be generated after submit' },
               { key: 'user_name', label: 'Name', value: currentUser?.full_name || 'Guest' },
               { key: 'user_phone', label: 'Phone', value: currentUser?.phone || '-' },
               { key: 'showroom', label: 'Showroom', value: showroomName },
@@ -2941,6 +4517,7 @@ export default function App() {
             ];
             const statusFor = (key, value) => {
               const val = String(value || '').trim();
+              if (key === 'booking_reference') return confirmedBooking?.booking_reference ? 'confirmed' : 'pending';
               if (!val) return 'missing';
               if (!confirmedBooking) return 'pending';
               const confirmedVal = String(confirmedBooking[key] || '').trim();
@@ -2970,7 +4547,7 @@ export default function App() {
                   </div>
                   <div className={`booking-status ${confirmedBooking ? 'confirmed' : 'draft'}`}>
                     <span>{confirmedBooking ? 'Confirmed' : 'Draft'}</span>
-                    <small>{confirmedBooking ? 'Details saved' : 'Not submitted yet'}</small>
+                    <small>{confirmedBooking?.booking_reference || (confirmedBooking ? 'Details saved' : 'Not submitted yet')}</small>
                   </div>
                 </div>
 
@@ -3089,6 +4666,61 @@ export default function App() {
         </section>
       )}
 
+      {page === 'profile' && currentUser && (
+        <section className="page-section profile-page">
+          <div className="profile-card">
+            <div className="profile-card-head">
+              <div>
+                <p className="eyebrow">Account Profile</p>
+                <h1>Update Your Details</h1>
+                <p className="muted-text">Changes are synced to your account record, bookings, and admin dashboard.</p>
+              </div>
+              <div className="profile-meta">
+                <span>{currentUser.is_admin ? 'Administrator' : 'Member'}</span>
+                <small>Joined {String(currentUser.created_at || '').slice(0, 10) || '-'}</small>
+              </div>
+            </div>
+            <form className="auth-form profile-form" onSubmit={handleProfileUpdate}>
+              <input
+                placeholder="Full Name *"
+                value={profileForm.full_name}
+                onChange={(e) => setProfileForm((prev) => ({ ...prev, full_name: e.target.value }))}
+              />
+              <input
+                placeholder="Phone Number"
+                value={profileForm.phone}
+                onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
+              />
+              <input
+                placeholder="Email Address *"
+                value={profileForm.email}
+                onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+              />
+              <div className="profile-actions">
+                <button className="btn black" disabled={profileLoading} type="submit">
+                  {profileLoading ? 'Saving...' : 'Save Profile'}
+                </button>
+                <button
+                  className="btn light"
+                  type="button"
+                  onClick={() =>
+                    setProfileForm({
+                      full_name: currentUser?.full_name || '',
+                      phone: currentUser?.phone || '',
+                      email: currentUser?.email || '',
+                    })
+                  }
+                >
+                  Reset
+                </button>
+              </div>
+              {profileError && <p className="auth-error">{profileError}</p>}
+              {profileMessage && <p className="auth-ok">{profileMessage}</p>}
+            </form>
+          </div>
+        </section>
+      )}
+
       {page === 'about' && (
         <section className="page-section about-section">
           <h1>About MGNITION</h1>
@@ -3200,6 +4832,7 @@ export default function App() {
                       <table className="admin-table">
                         <thead>
                           <tr>
+                            <th>Booking ID</th>
                             <th>Date</th>
                             <th>User</th>
                             <th>Showroom</th>
@@ -3209,6 +4842,7 @@ export default function App() {
                         <tbody>
                           {adminBookings.slice(0, 5).map((row) => (
                             <tr key={`booking-preview-${row.id}`}>
+                              <td>{row.booking_reference || '-'}</td>
                               <td>{row.created_at || '-'}</td>
                               <td>{row.user_name || '-'}</td>
                               <td>{row.showroom_name || '-'}</td>
@@ -3217,7 +4851,7 @@ export default function App() {
                           ))}
                           {!adminBookings.length && (
                             <tr>
-                              <td colSpan={4}>No bookings yet.</td>
+                              <td colSpan={5}>No bookings yet.</td>
                             </tr>
                           )}
                         </tbody>
@@ -3246,10 +4880,124 @@ export default function App() {
                 <div className="admin-grid admin-grid-analytics">
                   <article className="admin-card">
                     <div className="admin-card-head">
-                      <h3>Top Saved Variants</h3>
+                      <h3>Top Saved Variants Time Series</h3>
                     </div>
+                    <div className="admin-analytics-filters">
+                      <label className="admin-filter-field">
+                        <span>From</span>
+                        <input
+                          type="date"
+                          value={analyticsRange.start_date}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, start_date: e.target.value }))}
+                        />
+                      </label>
+                      <label className="admin-filter-field">
+                        <span>To</span>
+                        <input
+                          type="date"
+                          value={analyticsRange.end_date}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, end_date: e.target.value }))}
+                        />
+                      </label>
+                      <label className="admin-filter-field">
+                        <span>Bucket</span>
+                        <select
+                          value={analyticsRange.granularity}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, granularity: e.target.value }))}
+                        >
+                          <option value="day">Daily</option>
+                          <option value="week">Weekly</option>
+                          <option value="month">Monthly</option>
+                        </select>
+                      </label>
+                      <label className="admin-filter-field">
+                        <span>Top Variants</span>
+                        <select
+                          value={analyticsRange.top_n}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, top_n: Number(e.target.value) }))}
+                        >
+                          <option value={3}>Top 3</option>
+                          <option value={5}>Top 5</option>
+                          <option value={8}>Top 8</option>
+                          <option value={10}>Top 10</option>
+                        </select>
+                      </label>
+                    </div>
+                    {adminAnalyticsRangeLoading && <p className="muted-text">Loading analytics...</p>}
+                    {!!adminAnalyticsRangeError && <p className="auth-error">{adminAnalyticsRangeError}</p>}
+                    {hasSavedTimeseries && savedVariantTimeSeries.length && savedVariantTimeBuckets.length ? (
+                      <div className="admin-line-chart admin-line-chart-variants">
+                        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Top saved variants time series">
+                          {variantYAxisTicks.map((tick) => (
+                            <g key={`variant-y-tick-${tick}`}>
+                              <line
+                                className="chart-grid"
+                                x1={variantPadLeft}
+                                y1={variantY(tick)}
+                                x2={variantPadLeft + variantInnerW}
+                                y2={variantY(tick)}
+                              />
+                              <text className="chart-axis-text" x={variantPadLeft - 6} y={variantY(tick) + 3} textAnchor="end">
+                                {tick}
+                              </text>
+                            </g>
+                          ))}
+                          {savedVariantTimeSeries.map((row, seriesIdx) =>
+                            (row.counts || []).map((value, bucketIdx) => {
+                              const v = Number(value || 0);
+                              if (v <= 0) return null;
+                              const height = (v / variantTrendMax) * variantInnerH;
+                              const x =
+                                variantPadLeft +
+                                bucketIdx * variantGroupWidth +
+                                variantBarGap +
+                                seriesIdx * (variantBarWidth + variantBarGap);
+                              const y = variantPadTop + variantInnerH - height;
+                              return (
+                                <rect
+                                  key={`variant-bar-${row.variant_key}-${bucketIdx}`}
+                                  x={x}
+                                  y={y}
+                                  width={variantBarWidth}
+                                  height={height}
+                                  rx={2}
+                                  ry={2}
+                                  fill={variantLineColors[seriesIdx % variantLineColors.length]}
+                                />
+                              );
+                            })
+                          )}
+                          {variantXTicks.map((bucketIdx) => (
+                            <text
+                              key={`variant-x-tick-${bucketIdx}`}
+                              className="chart-x-text"
+                              x={variantPadLeft + bucketIdx * variantGroupWidth + variantGroupWidth / 2}
+                              y={chartHeight - 4}
+                              textAnchor="middle"
+                            >
+                              {trendLabel(savedVariantTimeBuckets[bucketIdx])}
+                            </text>
+                          ))}
+                        </svg>
+                        <div className="admin-chart-legend admin-chart-legend-wrap">
+                          {savedVariantTimeSeries.map((row, idx) => (
+                            <span key={`variant-legend-${row.variant_key}`} className="legend-item">
+                              <i className="legend-dot" style={{ background: variantLineColors[idx % variantLineColors.length] }} />
+                              {variantLabelFromKey(row.variant_key)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : hasSavedTimeseries ? (
+                      !adminAnalyticsRangeLoading && <p className="muted-text">No save data for selected time range.</p>
+                    ) : (
+                      !adminAnalyticsRangeLoading && (
+                        <p className="muted-text">Time-series data is unavailable from current backend response.</p>
+                      )
+                    )}
+                    <h4 className="admin-subsection-title">Total Saves in Selected Range</h4>
                     <div className="admin-chart">
-                      {topSavedVariants.map((r) => (
+                      {topSavedVariantsAligned.map((r) => (
                         <div className="admin-bar-row" key={`save-${r.variant_key}`}>
                           <span className="bar-label">{variantLabelFromKey(r.variant_key)}</span>
                           <div className="bar-track">
@@ -3261,58 +5009,213 @@ export default function App() {
                           <span className="bar-value">{r.cnt}</span>
                         </div>
                       ))}
-                      {!topSavedVariants.length && <p className="muted-text">No save data yet.</p>}
+                      {!topSavedVariantsAligned.length && !adminAnalyticsRangeLoading && <p className="muted-text">No save data yet.</p>}
                     </div>
                   </article>
 
                   <article className="admin-card">
                     <div className="admin-card-head">
-                      <h3>Conversion by Quiz Segment</h3>
+                      <h3>Most Booked Cars Timeline</h3>
                     </div>
+                    <div className="admin-analytics-filters">
+                      <label className="admin-filter-field">
+                        <span>From</span>
+                        <input
+                          type="date"
+                          value={analyticsRange.start_date}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, start_date: e.target.value }))}
+                        />
+                      </label>
+                      <label className="admin-filter-field">
+                        <span>To</span>
+                        <input
+                          type="date"
+                          value={analyticsRange.end_date}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, end_date: e.target.value }))}
+                        />
+                      </label>
+                      <label className="admin-filter-field">
+                        <span>Bucket</span>
+                        <select
+                          value={analyticsRange.granularity}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, granularity: e.target.value }))}
+                        >
+                          <option value="day">Daily</option>
+                          <option value="week">Weekly</option>
+                          <option value="month">Monthly</option>
+                        </select>
+                      </label>
+                      <label className="admin-filter-field">
+                        <span>Top Variants</span>
+                        <select
+                          value={analyticsRange.top_n}
+                          onChange={(e) => setAnalyticsRange((prev) => ({ ...prev, top_n: Number(e.target.value) }))}
+                        >
+                          <option value={3}>Top 3</option>
+                          <option value={5}>Top 5</option>
+                          <option value={8}>Top 8</option>
+                          <option value={10}>Top 10</option>
+                        </select>
+                      </label>
+                    </div>
+                    {hasBookedTimeseries && bookedVariantTimeSeries.length && bookedVariantTimeBuckets.length ? (
+                      <div className="admin-line-chart admin-line-chart-variants">
+                        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Most booked cars time series">
+                          {bookedYAxisTicks.map((tick) => (
+                            <g key={`booked-y-tick-${tick}`}>
+                              <line
+                                className="chart-grid"
+                                x1={bookedPadLeft}
+                                y1={bookedY(tick)}
+                                x2={bookedPadLeft + bookedInnerW}
+                                y2={bookedY(tick)}
+                              />
+                              <text className="chart-axis-text" x={bookedPadLeft - 6} y={bookedY(tick) + 3} textAnchor="end">
+                                {tick}
+                              </text>
+                            </g>
+                          ))}
+                          {bookedVariantTimeSeries.map((row, seriesIdx) =>
+                            (row.counts || []).map((value, bucketIdx) => {
+                              const v = Number(value || 0);
+                              if (v <= 0) return null;
+                              const height = (v / bookedTrendMax) * bookedInnerH;
+                              const x =
+                                bookedPadLeft +
+                                bucketIdx * bookedGroupWidth +
+                                bookedBarGap +
+                                seriesIdx * (bookedBarWidth + bookedBarGap);
+                              const y = bookedPadTop + bookedInnerH - height;
+                              return (
+                                <rect
+                                  key={`booked-bar-${row.variant_key}-${bucketIdx}`}
+                                  x={x}
+                                  y={y}
+                                  width={bookedBarWidth}
+                                  height={height}
+                                  rx={2}
+                                  ry={2}
+                                  fill={variantLineColors[seriesIdx % variantLineColors.length]}
+                                />
+                              );
+                            })
+                          )}
+                          {bookedXTicks.map((bucketIdx) => (
+                            <text
+                              key={`booked-x-tick-${bucketIdx}`}
+                              className="chart-x-text"
+                              x={bookedPadLeft + bucketIdx * bookedGroupWidth + bookedGroupWidth / 2}
+                              y={chartHeight - 4}
+                              textAnchor="middle"
+                            >
+                              {trendLabel(bookedVariantTimeBuckets[bucketIdx])}
+                            </text>
+                          ))}
+                        </svg>
+                        <div className="admin-chart-legend admin-chart-legend-wrap">
+                          {bookedVariantTimeSeries.map((row, idx) => (
+                            <span key={`booked-legend-${row.variant_key}`} className="legend-item">
+                              <i className="legend-dot" style={{ background: variantLineColors[idx % variantLineColors.length] }} />
+                              {variantLabelFromKey(row.variant_key)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : hasBookedTimeseries ? (
+                      !adminAnalyticsRangeLoading && <p className="muted-text">No booking data for selected time range.</p>
+                    ) : (
+                      !adminAnalyticsRangeLoading && (
+                        <p className="muted-text">Booking time-series data is unavailable from current backend response.</p>
+                      )
+                    )}
+                    <h4 className="admin-subsection-title">Total Bookings in Selected Range</h4>
                     <div className="admin-chart">
-                      {conversionSegments.map((row) => (
-                        <div className="admin-bar-row" key={row.segment}>
-                          <span className="bar-label">{row.segment}</span>
+                      {topBookedVariantsAligned.map((row) => (
+                        <div className="admin-bar-row" key={`booked-${row.variant_key}`}>
+                          <span className="bar-label">{variantLabelFromKey(row.variant_key)}</span>
                           <div className="bar-track">
                             <span
                               className="bar-fill"
-                              style={{ width: `${(Number(row.conversion_rate || 0) / maxConversionRate) * 100}%` }}
+                              style={{ width: `${(Number(row.cnt || 0) / maxBookedCount) * 100}%` }}
                             />
                           </div>
-                          <span className="bar-value">{row.conversion_rate}%</span>
+                          <span className="bar-value">{row.cnt}</span>
                         </div>
                       ))}
-                      {!conversionSegments.length && <p className="muted-text">No conversion data yet.</p>}
+                      {!topBookedVariantsAligned.length && <p className="muted-text">No booking data yet.</p>}
                     </div>
                   </article>
                 </div>
 
                 <article className="admin-card">
                   <div className="admin-card-head">
-                    <h3>Impressions vs Saves Trend</h3>
+                    <h3>Recommendation Funnel Trend</h3>
                   </div>
-                  {impressionsTrend.length ? (
+                  {funnelTrend.length ? (
                     <div className="admin-line-chart">
-                      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Impressions and saves trend">
-                        <polyline
-                          className="line impressions"
-                          fill="none"
-                          points={trendLine('impressions')}
-                        />
-                        <polyline
-                          className="line saves"
-                          fill="none"
-                          points={trendLine('saves')}
-                        />
+                      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Recommendation funnel trend">
+                        {funnelYAxisTicks.map((tick) => (
+                          <g key={`funnel-y-tick-${tick}`}>
+                            <line
+                              className="chart-grid"
+                              x1={funnelPadLeft}
+                              y1={funnelY(tick)}
+                              x2={funnelPadLeft + funnelInnerW}
+                              y2={funnelY(tick)}
+                            />
+                            <text className="chart-axis-text" x={funnelPadLeft - 6} y={funnelY(tick) + 3} textAnchor="end">
+                              {tick}
+                            </text>
+                          </g>
+                        ))}
+                        {funnelTrend.map((row, bucketIdx) =>
+                          funnelSeries.map((series, seriesIdx) => {
+                            const value = Number(row[series.key] || 0);
+                            if (value <= 0) return null;
+                            const height = (value / funnelMaxCount) * funnelInnerH;
+                            const x =
+                              funnelPadLeft +
+                              bucketIdx * funnelGroupWidth +
+                              funnelBarGap +
+                              seriesIdx * (funnelBarWidth + funnelBarGap);
+                            const y = funnelPadTop + funnelInnerH - height;
+                            return (
+                              <rect
+                                key={`funnel-${series.key}-${bucketIdx}`}
+                                x={x}
+                                y={y}
+                                width={funnelBarWidth}
+                                height={height}
+                                rx={2}
+                                ry={2}
+                                fill={series.color}
+                              />
+                            );
+                          })
+                        )}
+                        {funnelXTicks.map((bucketIdx) => (
+                          <text
+                            key={`funnel-x-tick-${bucketIdx}`}
+                            className="chart-x-text"
+                            x={funnelPadLeft + bucketIdx * funnelGroupWidth + funnelGroupWidth / 2}
+                            y={chartHeight - 4}
+                            textAnchor="middle"
+                          >
+                            {trendLabel(funnelTrend[bucketIdx]?.date)}
+                          </text>
+                        ))}
                       </svg>
                       <div className="admin-chart-legend">
-                        <span className="legend-item"><i className="legend-dot impressions" />Impressions</span>
-                        <span className="legend-item"><i className="legend-dot saves" />Saves</span>
+                        {funnelSeries.map((s) => (
+                          <span className="legend-item" key={`funnel-legend-${s.key}`}>
+                            <i className="legend-dot" style={{ background: s.color }} />
+                            {s.label}
+                          </span>
+                        ))}
                       </div>
-                      <div className="admin-chart-axis">
-                        <span>{trendLabel(trendStart)}</span>
-                        <span>{trendLabel(trendMid)}</span>
-                        <span>{trendLabel(trendEnd)}</span>
+                      <div className="admin-funnel-metrics">
+                        <span>Avg Save Rate: {avgSaveRate.toFixed(2)}%</span>
+                        <span>Avg Booking Rate: {avgBookingRate.toFixed(2)}%</span>
                       </div>
                     </div>
                   ) : (
@@ -3320,6 +5223,45 @@ export default function App() {
                   )}
                 </article>
               </>
+            )}
+
+            {adminSection === 'users' && (
+              <article className="admin-card">
+                <div className="admin-card-head">
+                  <h3>Registered Users</h3>
+                </div>
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>User ID</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Role</th>
+                        <th>Created</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminUsers.map((row) => (
+                        <tr key={`user-${row.id}`}>
+                          <td>{row.id}</td>
+                          <td>{row.full_name || '-'}</td>
+                          <td>{row.email || '-'}</td>
+                          <td>{row.phone || '-'}</td>
+                          <td>{row.is_admin ? 'Admin' : 'User'}</td>
+                          <td>{row.created_at || '-'}</td>
+                        </tr>
+                      ))}
+                      {!adminUsers.length && (
+                        <tr>
+                          <td colSpan={6}>No users found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
             )}
 
             {adminSection === 'bookings' && (
@@ -3331,6 +5273,7 @@ export default function App() {
                   <table className="admin-table">
                     <thead>
                       <tr>
+                        <th>Booking ID</th>
                         <th>Date</th>
                         <th>User</th>
                         <th>Contact</th>
@@ -3343,6 +5286,7 @@ export default function App() {
                     <tbody>
                       {adminBookings.map((row) => (
                         <tr key={`booking-${row.id}`}>
+                          <td>{row.booking_reference || '-'}</td>
                           <td>{row.created_at || '-'}</td>
                           <td>{row.user_name || '-'}</td>
                           <td>{row.user_email || '-'} / {row.user_phone || '-'}</td>
@@ -3364,7 +5308,7 @@ export default function App() {
                       ))}
                       {!adminBookings.length && (
                         <tr>
-                          <td colSpan={7}>No bookings yet.</td>
+                          <td colSpan={8}>No bookings yet.</td>
                         </tr>
                       )}
                     </tbody>
@@ -3399,10 +5343,33 @@ export default function App() {
                     </select>
                     <input placeholder="Price Text" value={promoForm.price_text} onChange={(e) => setPromoForm((p) => ({ ...p, price_text: e.target.value }))} />
                     <input placeholder="Badge Text" value={promoForm.badge_text} onChange={(e) => setPromoForm((p) => ({ ...p, badge_text: e.target.value }))} />
-                    <input placeholder="Image URL" value={promoForm.image_url} onChange={(e) => setPromoForm((p) => ({ ...p, image_url: e.target.value }))} />
                     <input placeholder="Start Date (YYYY-MM-DD)" value={promoForm.start_date} onChange={(e) => setPromoForm((p) => ({ ...p, start_date: e.target.value }))} />
                     <input placeholder="End Date (YYYY-MM-DD)" value={promoForm.end_date} onChange={(e) => setPromoForm((p) => ({ ...p, end_date: e.target.value }))} />
                     <input placeholder="Description" value={promoForm.description} onChange={(e) => setPromoForm((p) => ({ ...p, description: e.target.value }))} />
+                    <div className="promo-upload-block">
+                      <label htmlFor="promo-image-upload" className="promo-upload-label">Upload photo from device</label>
+                      <input
+                        id="promo-image-upload"
+                        ref={promoImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePromotionImageUpload}
+                      />
+                      <div className="promo-upload-meta">
+                        <span>{promoImageName ? `Selected: ${promoImageName}` : 'Supported: PNG, JPG, WEBP (max 3 MB)'}</span>
+                        <button
+                          type="button"
+                          className="promo-upload-clear"
+                          onClick={clearPromotionImage}
+                          disabled={!promoForm.image_url}
+                        >
+                          Clear Image
+                        </button>
+                      </div>
+                      {!!promoForm.image_url && (
+                        <img className="promo-upload-preview" src={promoForm.image_url} alt="Promotion preview" />
+                      )}
+                    </div>
                     <button className="btn black full" type="submit">Publish Promotion</button>
                   </form>
                 </article>
@@ -3455,29 +5422,6 @@ export default function App() {
               </>
             )}
 
-
-            {adminSection === 'models' && (
-              <article className="admin-card">
-                <div className="admin-card-head">
-                  <h3>Add Car Model / Variant</h3>
-                </div>
-                <form className="auth-form" onSubmit={handleAddAdminModel}>
-                  <input placeholder="Model *" value={adminModelForm.model} onChange={(e) => setAdminModelForm((p) => ({ ...p, model: e.target.value }))} />
-                  <input placeholder="Variant" value={adminModelForm.variant} onChange={(e) => setAdminModelForm((p) => ({ ...p, variant: e.target.value }))} />
-                  <input placeholder="Year" value={adminModelForm.year} onChange={(e) => setAdminModelForm((p) => ({ ...p, year: e.target.value }))} />
-                  <input placeholder="Price (THB)" value={adminModelForm.price_thb} onChange={(e) => setAdminModelForm((p) => ({ ...p, price_thb: e.target.value }))} />
-                  <input placeholder="Fuel Type" value={adminModelForm.fuel_type} onChange={(e) => setAdminModelForm((p) => ({ ...p, fuel_type: e.target.value }))} />
-                  <input placeholder="Seats" value={adminModelForm.seats} onChange={(e) => setAdminModelForm((p) => ({ ...p, seats: e.target.value }))} />
-                  <input placeholder="Body Type" value={adminModelForm.body_type} onChange={(e) => setAdminModelForm((p) => ({ ...p, body_type: e.target.value }))} />
-                  <input placeholder="Horsepower (hp)" value={adminModelForm.horsepower_hp} onChange={(e) => setAdminModelForm((p) => ({ ...p, horsepower_hp: e.target.value }))} />
-                  <input placeholder="Torque (Nm)" value={adminModelForm.torque_nm} onChange={(e) => setAdminModelForm((p) => ({ ...p, torque_nm: e.target.value }))} />
-                  <input placeholder="Range (km)" value={adminModelForm.range_km} onChange={(e) => setAdminModelForm((p) => ({ ...p, range_km: e.target.value }))} />
-                  <input placeholder="Cargo (Liters)" value={adminModelForm.cargo_liters} onChange={(e) => setAdminModelForm((p) => ({ ...p, cargo_liters: e.target.value }))} />
-                  <input placeholder="Image URL" value={adminModelForm.image_url} onChange={(e) => setAdminModelForm((p) => ({ ...p, image_url: e.target.value }))} />
-                  <button className="btn black full" type="submit">Add Model</button>
-                </form>
-              </article>
-            )}
 
             {adminSection === 'best-sellers' && (
               <>
@@ -3575,7 +5519,7 @@ export default function App() {
   );
 }
 
-function TopBar({ active, navItems, onNav, onAuth, currentUser, onLogout }) {
+function TopBar({ active, navItems, onNav, onAuth, currentUser, onProfile, onLogout }) {
   const items = navItems || NAV_ITEMS;
   return (
     <header className="topbar">
@@ -3595,7 +5539,9 @@ function TopBar({ active, navItems, onNav, onAuth, currentUser, onLogout }) {
       <div className="auth-buttons">
         {currentUser ? (
           <>
-            <span className="user-chip">{currentUser.full_name}</span>
+            <button className="user-chip user-chip-btn" onClick={onProfile} type="button">
+              {currentUser.full_name}
+            </button>
             <button className="btn light" onClick={onLogout} type="button">Log out</button>
           </>
         ) : (

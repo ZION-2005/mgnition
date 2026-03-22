@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -97,6 +97,10 @@ def train(csv_path, out_path):
     df = pd.read_csv(csv_path)
     colmap = build_colmap(df)
 
+
+# xs = list of feature dicts
+# ys = list of labels
+
     xs = []
     ys = []
     for _, row in df.iterrows():
@@ -117,7 +121,6 @@ def train(csv_path, out_path):
     vec = DictVectorizer(sparse=True)
     X = vec.fit_transform(xs)
     clf = LogisticRegression(
-        multi_class="multinomial",
         solver="lbfgs",
         class_weight="balanced",
         C=0.3,
@@ -130,7 +133,7 @@ def train(csv_path, out_path):
     artifact = {
         "vectorizer": vec,
         "model": clf,
-        "trained_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "samples": len(ys),
         "class_counts": dict(Counter(ys)),
         "source_csv": str(csv_path),

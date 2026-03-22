@@ -155,6 +155,19 @@
     "defaultColor": "Black Knight"
   },
   {
+    "model": "MG MAXUS 9 Plus",
+    "price": "1,849,000 THB",
+    "fuel": "EV",
+    "seats": 7.0,
+    "bodyType": "MPV",
+    "colorImages": {
+      "Black Knight": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/ec5d3c219edfd86c162dbb3ea9eca7f8.png",
+      "Pearl White": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/18942a471d290877b0edb44867cfc7e3.png",
+      "Granite Grey": "https://www.mgcars.com/cdn-cgi/image/width=3840,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/a905c37cdfaeeb7f1bab990e66d9956f.png"
+    },
+    "defaultColor": "Black Knight"
+  },
+  {
     "model": "MG VS HEV",
     "price": "699,000 THB",
     "fuel": "Hybrid",
@@ -220,6 +233,21 @@
       "Crayon Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/42076c9ed6faafa74fd6ee04e1dfa1a4.png"
     },
     "defaultColor": "Crayon Grey"
+  },
+  {
+    "model": "MG IM6 LONG RANGE",
+    "price": "1,599,900 THB",
+    "fuel": "EV",
+    "seats": 5.0,
+    "bodyType": "SUV",
+    "colorImages": {
+      "Nevis Blue": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/9303d7bc507e4fb6dbdfde2a5a276cbb.png",
+      "Raphael Beige": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/ee357fb954c8b81af683ceb3a7edde44.png",
+      "Ferdinand Pink": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/8cca3f58608b92da9c53192e15dfe224.png",
+      "Rembrandt Grey": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/287b0f851fdf120fb8e358e7a95f2c3c.png",
+      "Ares Black": "https://www.mgcars.com/cdn-cgi/image/width=1920,quality=80,format=webp/https://mg-upload.sgp1.cdn.digitaloceanspaces.com/2628f6fd3affa2c046e4c1824c9ec115.png"
+    },
+    "defaultColor": "Nevis Blue"
   },
   {
     "model": "MGS5 EV PLUS",
