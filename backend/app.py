@@ -684,7 +684,11 @@ def smtp_settings():
     smtp_host = os.getenv("SMTP_HOST")
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_port_raw = clean_str(os.getenv("SMTP_PORT")) or "587"
+    try:
+        smtp_port = int(smtp_port_raw)
+    except Exception:
+        smtp_port = 587
     smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@mgnition.local")
     if not smtp_host or not smtp_user or not smtp_pass:
         return None
